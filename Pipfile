@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+dv-processing = "*"
+opencv-python = "*"
+dv = "*"
+pybind11-stubgen = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.13"
+python_full_version = "3.13.9"
+
+[scripts]
+start   = "python cam_to_opencv.py"
