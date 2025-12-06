@@ -6,7 +6,6 @@ name = "pypi"
 [packages]
 dv-processing = "*"
 opencv-python = "*"
-dv = "*"
 pybind11-stubgen = "*"
 ipython = "*"
 ipykernel = "*"
@@ -14,11 +13,19 @@ numpy = "*"
 matplotlib = "*"
 plotly = "*"
 nbformat = ">=4.2.0"
+nengo = "3.2.0"
+nengo-dl = "3.6.0"
+tqdm = "*"
+scipy = "*"
+tensorflow = "==2.12.0"
+scikit-learn = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "3.13"
+python_version = "3.10"
 
 [scripts]
 start   = "python cam_to_opencv.py"
+extract = "python feature_extraction.py"
+preprocess = "python preprocess_data.py"
