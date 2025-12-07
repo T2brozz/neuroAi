@@ -354,5 +354,7 @@ def load_preprocessed(data_dir: Path) -> Tuple[Dict[str, Tuple[np.ndarray, np.nd
         print(f"Loaded {split_name}: X={X.shape}, y={y.shape}")
     
     class_names = np.load(data_dir / Path('class_names.npy'), allow_pickle=True).tolist()
+
+    print(f"Loaded class names: {class_names}")
     
     return splits, class_names

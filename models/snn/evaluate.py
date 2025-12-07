@@ -4,7 +4,7 @@ import nengo_dl
 
 from models.snn.factory import build_snn
 
-def evaluate_model(n_hidden: int, syn: float, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray, n_features: int, n_classes: int) -> float:
+def evaluate_model(n_hidden: int, syn: float, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray, n_features: int, n_classes: int) -> tuple[float, nengo_dl.Simulator, tf.keras.callbacks.History]:
     net, inp, p_out = build_snn(
         n_features=n_features,
         n_classes=n_classes,
@@ -31,4 +31,4 @@ def evaluate_model(n_hidden: int, syn: float, X_train: np.ndarray, y_train: np.n
     val_acc = history.history["val_p_out_accuracy"][-1]
     sim.close()
 
-    return val_acc
+    return val_acc, sim, history

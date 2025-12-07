@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
+FROM nvidia/cuda:11.2.0-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PIPENV_VENV_IN_PROJECT=1
@@ -14,9 +14,9 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update && apt-get install -y \
-    python3.11 \
-    python3.11-venv \
-    python3.11-distutils \
+    python3.10 \
+    python3.10-venv \
+    python3.10-distutils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install --upgrade pip setuptools wheel \
@@ -26,6 +26,6 @@ WORKDIR /workspace
 
 COPY Pipfile Pipfile.lock* /
 
-RUN PIPENV_PYTHON=3.11 pipenv install --deploy
+RUN PIPENV_PYTHON=3.10 pipenv install --deploy
 
 CMD ["pipenv", "run", "jupyter", "notebook", "--ip=0.0.0.0", "--allow-root"]
