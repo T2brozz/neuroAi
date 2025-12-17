@@ -25,6 +25,9 @@ def main():
         'target_width': 64,
         'target_height': 48,
         'n_bins': 10,
+        'filter_activity': True,  # Filter out low-activity periods
+        'activity_window_ms': 100,  # Time window for activity filtering
+        'activity_min_events': 10,  # Min events per window to keep
         'val_split': 0.2,
         'test_split': 0.1,
     }
@@ -45,7 +48,10 @@ def main():
         spatial_downsample=config['spatial_downsample'],
         target_width=config['target_width'],
         target_height=config['target_height'],
-        n_bins=config['n_bins']
+        n_bins=config['n_bins'],
+        filter_activity=config['filter_activity'],
+        activity_window_ms=config['activity_window_ms'],
+        activity_min_events=config['activity_min_events']
     )
     
     # Normalize

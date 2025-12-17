@@ -19,6 +19,55 @@ def load_event_file(filepath: Path) -> np.ndarray:
     return np.load(filepath, allow_pickle=True)
 
 
+def filter_events_by_activity(events: np.ndarray,
+                              window_ms: int = 100,
+                              min_events_per_window: int = 10) -> np.ndarray:
+    """
+    Filter out inactive periods by removing events from low-activity time windows.
+    Useful for removing frames where no person is visible/moving.
+    
+    Args:
+        events: Structured array with fields (t, x, y, p)
+        window_ms: Time window size in milliseconds
+        min_events_per_window: Minimum events required in a window to keep them
+        
+    Returns:
+        Filtered events array
+    """
+    if len(events) == 0:
+        return events
+    
+    # Convert window from ms to microseconds (assuming event timestamps are in us)
+    window_us = window_ms * 1000
+    
+    t_min = events['t'].min()
+    t_max = events['t'].max()
+    
+    # Create windows
+    num_windows = int(np.ceil((t_max - t_min) / window_us))
+    
+    # Mark events in active windows
+    active_mask = np.zeros(len(events), dtype=bool)
+    
+    for window_idx in range(num_windows):
+        window_start = t_min + window_idx * window_us
+        window_end = window_start + window_us
+        
+        window_mask = (events['t'] >= window_start) & (events['t'] < window_end)
+        event_count = np.sum(window_mask)
+        
+        # Mark events in this window as active if threshold met
+        if event_count >= min_events_per_window:
+            active_mask[window_mask] = True
+    
+    filtered_events = events[active_mask]
+    
+    removed_pct = 100 * (1 - len(filtered_events) / len(events))
+    print(f"  Activity filter: Removed {removed_pct:.1f}% of events (window={window_ms}ms, min_events={min_events_per_window})")
+    
+    return filtered_events
+
+
 def events_to_features(events: np.ndarray, 
                        method: str = 'histogram',
                        width: int = 640,
@@ -144,7 +193,10 @@ def load_dataset(data_dir: Path,
                 spatial_downsample: bool = True,
                 target_width: int = 64,
                 target_height: int = 48,
-                n_bins: int = 10) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+                n_bins: int = 10,
+                filter_activity: bool = False,
+                activity_window_ms: int = 100,
+                activity_min_events: int = 10) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
     Load all event files and convert to features.
     
@@ -155,6 +207,9 @@ def load_dataset(data_dir: Path,
         target_width: Target width after downsampling
         target_height: Target height after downsampling
         n_bins: Number of temporal bins
+        filter_activity: Whether to filter out low-activity periods
+        activity_window_ms: Time window for activity filtering (milliseconds)
+        activity_min_events: Minimum events required per window to keep
         
     Returns:
         Tuple of (features, labels, class_names)
@@ -187,6 +242,14 @@ def load_dataset(data_dir: Path,
         if len(events) == 0:
             print(f"  Warning: {filepath.name} has no events, skipping")
             continue
+        
+        # Filter low-activity periods
+        if filter_activity:
+            events = filter_events_by_activity(
+                events,
+                window_ms=activity_window_ms,
+                min_events_per_window=activity_min_events
+            )
         
         # Optionally downsample
         if spatial_downsample:
