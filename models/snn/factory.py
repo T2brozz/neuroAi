@@ -23,7 +23,8 @@ def build_snn(
 
     with nengo.Network() as net:
         # Input node - nengo_dl will feed data directly to this
-        inp = nengo.Node(size_in=n_features)
+        # size_in=0 means this is a pure input node (for nengo_dl)
+        inp = nengo.Node(np.zeros(n_features))
 
         # Dimensionality reduction layer (fixed random projection)
         reduction_transform = rng.normal(0.0, 1.0 / np.sqrt(n_features), (reduced_dim, n_features))
