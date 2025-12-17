@@ -215,30 +215,14 @@ def load_dataset(data_dir: Path,
     return X, y, unique_labels
 
 
-def normalize_features(X: np.ndarray, method: str = 'standard') -> np.ndarray:
+def normalize_features(X: np.ndarray) -> np.ndarray:
     """
-    Normalize feature vectors.
-    
-    Args:
-        X: Feature matrix (n_samples, n_features)
-        method: 'standard' (z-score) or 'minmax'
-        
-    Returns:
-        Normalized features
+    Normalize feature vectors using standard (z-score) normalization.
     """
-    if method == 'standard':
-        mean = X.mean(axis=0)
-        std = X.std(axis=0)
-        std[std == 0] = 1  # Avoid division by zero
-        return (X - mean) / std
-    elif method == 'minmax':
-        min_val = X.min(axis=0)
-        max_val = X.max(axis=0)
-        range_val = max_val - min_val
-        range_val[range_val == 0] = 1
-        return (X - min_val) / range_val
-    else:
-        raise ValueError(f"Unknown normalization method: {method}")
+    mean = X.mean(axis=0)
+    std = X.std(axis=0)
+    std[std == 0] = 1
+    return (X - mean) / std
 
 
 def split_dataset(X: np.ndarray,
@@ -248,16 +232,6 @@ def split_dataset(X: np.ndarray,
                  random_state: int = 42) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
     """
     Split dataset into train/val/test.
-    
-    Args:
-        X: Features (n_samples, n_features)
-        y: Labels (n_samples,)
-        val_split: Validation fraction
-        test_split: Test fraction
-        random_state: Random seed
-        
-    Returns:
-        Dict with 'train', 'val', 'test' keys
     """
     # Check if stratification is possible
     unique, counts = np.unique(y, return_counts=True)
@@ -295,12 +269,7 @@ def split_dataset(X: np.ndarray,
         random_state=random_state,
         stratify=stratify_temp
     )
-    
-    print(f"\nDataset split:")
-    print(f"  Train: {X_train.shape[0]} samples")
-    print(f"  Val:   {X_val.shape[0]} samples")
-    print(f"  Test:  {X_test.shape[0]} samples")
-    
+
     return {
         'train': (X_train, y_train),
         'val': (X_val, y_val),

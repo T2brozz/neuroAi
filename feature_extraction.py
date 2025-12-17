@@ -1,9 +1,9 @@
 from tqdm import tqdm
-from event_types import dv_store_to_numpy
 import numpy as np
 from pathlib import Path
 from typing import List
 import dv_processing as dv
+from models.event_types import dv_store_to_numpy
 
 def get_aedat4_files(folder: Path) -> List[Path]:
     """Reads a folder and returns a list of all .aedat4 files."""

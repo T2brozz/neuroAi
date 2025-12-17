@@ -20,16 +20,13 @@ def main():
     
     # Configuration
     config = {
-        'feature_method': 'histogram',  # 'histogram', 'rate', or 'time_surface'
+        'feature_method': 'time_surface',  # 'histogram', 'rate', or 'time_surface'
         'spatial_downsample': True,
         'target_width': 64,
         'target_height': 48,
         'n_bins': 10,
-        'normalize': True,
-        'norm_method': 'standard',  # 'standard' or 'minmax'
         'val_split': 0.2,
         'test_split': 0.1,
-        'random_state': 42
     }
     
     print("=" * 60)
@@ -52,9 +49,7 @@ def main():
     )
     
     # Normalize
-    if config['normalize']:
-        print(f"\nStep 2: Normalizing features ({config['norm_method']})...")
-        X = normalize_features(X, method=config['norm_method'])
+    X = normalize_features(X)
     
     # Split dataset
     print("\nStep 3: Splitting dataset...")
@@ -62,7 +57,6 @@ def main():
         X, y,
         val_split=config['val_split'],
         test_split=config['test_split'],
-        random_state=config['random_state']
     )
     
     # Convert labels to one-hot for SNN training

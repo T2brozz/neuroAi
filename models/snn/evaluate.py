@@ -4,7 +4,7 @@ import nengo_dl
 
 from models.snn.factory import build_snn
 
-def evaluate_model(n_hidden: int, syn: float, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray, n_features: int, n_classes: int) -> tuple[float, nengo_dl.Simulator, tf.keras.callbacks.History]:
+def evaluate_model(n_hidden: int, syn: float, X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray, n_features: int, n_classes: int) -> tuple[float, tf.keras.callbacks.History]:
     net, inp, p_out = build_snn(
         n_features=n_features,
         n_classes=n_classes,
@@ -12,6 +12,7 @@ def evaluate_model(n_hidden: int, syn: float, X_train: np.ndarray, y_train: np.n
         synapse=syn,
     )
 
+    # Mark the input node for nengo_dl
     sim = nengo_dl.Simulator(net, minibatch_size=32)
 
     sim.compile(
@@ -20,10 +21,14 @@ def evaluate_model(n_hidden: int, syn: float, X_train: np.ndarray, y_train: np.n
         metrics={p_out: ["accuracy"]},
     )
 
+    # Reshape data for nengo_dl: (batch, time, features)
+    X_train_reshaped = X_train[:, np.newaxis, :]  # Add time dimension
+    X_val_reshaped = X_val[:, np.newaxis, :]
+    
     history = sim.fit(
-        {inp: X_train},
+        {inp: X_train_reshaped},
         {p_out: y_train},
-        validation_data=({inp: X_val}, {p_out: y_val}),
+        validation_data=({inp: X_val_reshaped}, {p_out: y_val}),
         epochs=10,
         verbose=0,
     )
@@ -31,4 +36,4 @@ def evaluate_model(n_hidden: int, syn: float, X_train: np.ndarray, y_train: np.n
     val_acc = history.history["val_p_out_accuracy"][-1]
     sim.close()
 
-    return val_acc, sim, history
+    return val_acc, history
