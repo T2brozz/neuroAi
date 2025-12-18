@@ -21,13 +21,13 @@ def main():
     # Configuration
     config = {
         'feature_method': 'time_surface',  # 'histogram', 'rate', or 'time_surface'
-        'spatial_downsample': True,
+        'spatial_downsample': False,
         'target_width': 64,
         'target_height': 48,
         'n_bins': 10,
-        'filter_activity': True,  # Filter out low-activity periods
-        'activity_window_ms': 100,  # Time window for activity filtering
-        'activity_min_events': 10,  # Min events per window to keep
+        'filter_activity': True,
+        'activity_window_ms': 1000,
+        'activity_min_events': 75000,
         'val_split': 0.2,
         'test_split': 0.1,
     }
