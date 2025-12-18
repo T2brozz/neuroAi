@@ -3,13 +3,15 @@
 Preprocess event data for SNN training.
 Reads .npy files from data/binary and creates train/val/test splits.
 """
+import numpy as np
 from pathlib import Path
 from models.preprocessing import (
     load_dataset,
     normalize_features,
     split_dataset,
     one_hot_encode,
-    save_preprocessed
+    save_preprocessed,
+    split_events_into_windows,
 )
 
 
@@ -24,12 +26,14 @@ def main():
         'spatial_downsample': False,
         'target_width': 64,
         'target_height': 48,
-        'n_bins': 10,
+        'n_bins': 10, # of time bins for histogram/rate features
         'filter_activity': True,
         'activity_window_ms': 1000,
         'activity_min_events': 75000,
+        'event_window_ms': 2000,
         'val_split': 0.2,
         'test_split': 0.1,
+        'random_seed': 42,
     }
     
     print("=" * 60)
@@ -51,11 +55,20 @@ def main():
         n_bins=config['n_bins'],
         filter_activity=config['filter_activity'],
         activity_window_ms=config['activity_window_ms'],
-        activity_min_events=config['activity_min_events']
+        activity_min_events=config['activity_min_events'],
+        event_window_ms=config['event_window_ms'],
     )
     
     # Normalize
     X = normalize_features(X)
+    
+    # Shuffle dataset with fixed seed
+    print("\nStep 2: Shuffling dataset...")
+    rng = np.random.RandomState(config['random_seed'])
+    shuffle_idx = rng.permutation(len(X))
+    X = X[shuffle_idx]
+    y = y[shuffle_idx]
+    print(f"  Shuffled with random seed: {config['random_seed']}")
     
     # Split dataset
     print("\nStep 3: Splitting dataset...")
@@ -63,6 +76,7 @@ def main():
         X, y,
         val_split=config['val_split'],
         test_split=config['test_split'],
+        random_state=config['random_seed'],
     )
     
     # Convert labels to one-hot for SNN training

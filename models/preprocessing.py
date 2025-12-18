@@ -188,6 +188,41 @@ def subsample_spatial(events: np.ndarray,
     return subsampled
 
 
+def split_events_into_windows(events: np.ndarray,
+                              window_ms: int) -> List[np.ndarray]:
+    """
+    Split events into fixed-duration time windows.
+    
+    Args:
+        events: Structured array with fields (t, x, y, p)
+        window_ms: Window size in milliseconds
+        
+    Returns:
+        List of event arrays, one per window
+    """
+    if len(events) == 0:
+        return []
+    
+    window_us = window_ms * 1000
+    t_min = events['t'].min()
+    t_max = events['t'].max()
+    
+    windows = []
+    window_start = t_min
+    
+    while window_start < t_max:
+        window_end = window_start + window_us
+        mask = (events['t'] >= window_start) & (events['t'] < window_end)
+        window_events = events[mask]
+        
+        if len(window_events) > 0:
+            windows.append(window_events)
+        
+        window_start = window_end
+    
+    return windows
+
+
 def load_dataset(data_dir: Path,
                 feature_method: str = 'histogram',
                 spatial_downsample: bool = True,
@@ -196,7 +231,8 @@ def load_dataset(data_dir: Path,
                 n_bins: int = 10,
                 filter_activity: bool = False,
                 activity_window_ms: int = 100,
-                activity_min_events: int = 10) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+                activity_min_events: int = 10,
+                event_window_ms: int = None) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
     Load all event files and convert to features.
     
@@ -210,6 +246,7 @@ def load_dataset(data_dir: Path,
         filter_activity: Whether to filter out low-activity periods
         activity_window_ms: Time window for activity filtering (milliseconds)
         activity_min_events: Minimum events required per window to keep
+        event_window_ms: Split events into time windows (milliseconds), None to disable
         
     Returns:
         Tuple of (features, labels, class_names)
@@ -251,24 +288,37 @@ def load_dataset(data_dir: Path,
                 min_events_per_window=activity_min_events
             )
         
-        # Optionally downsample
-        if spatial_downsample:
-            events = subsample_spatial(events, target_width, target_height)
-            width, height = target_width, target_height
+        # Split into time windows if specified
+        if event_window_ms is not None:
+            event_windows = split_events_into_windows(events, event_window_ms)
+            num_windows = len(event_windows)
+            print(f"  Split into {num_windows} time windows ({event_window_ms}ms each)")
         else:
-            width, height = 640, 480
+            event_windows = [events]
         
-        # Extract features
-        features = events_to_features(
-            events, 
-            method=feature_method,
-            width=width,
-            height=height,
-            n_bins=n_bins
-        )
-        
-        features_list.append(features)
-        labels_list.append(label_to_idx[label_str])
+        # Process each window
+        for window_events in event_windows:
+            if len(window_events) == 0:
+                continue
+            
+            # Optionally downsample
+            if spatial_downsample:
+                window_events = subsample_spatial(window_events, target_width, target_height)
+                width, height = target_width, target_height
+            else:
+                width, height = 640, 480
+            
+            # Extract features
+            features = events_to_features(
+                window_events, 
+                method=feature_method,
+                width=width,
+                height=height,
+                n_bins=n_bins
+            )
+            
+            features_list.append(features)
+            labels_list.append(label_to_idx[label_str])
     
     X = np.array(features_list, dtype=np.float32)
     y = np.array(labels_list, dtype=np.int32)
