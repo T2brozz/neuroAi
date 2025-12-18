@@ -39,21 +39,9 @@ def train_model(
         Tuple of (training history, simulator)
     """
     print("Creating simulator...")
-    # Determine appropriate batch size and nengo_dl settings
     actual_batch_size = min(batch_size, len(X_train))
     
-    # Configure nengo_dl for small datasets
-    if len(X_train) < 10:
-        # For very small datasets, use minimal unroll_simulation
-        nengo_dl.configure_settings(unroll_simulation=1, stateful=False)
-        actual_batch_size = 1
-        print(f"  Small dataset detected ({len(X_train)} samples)")
-        print(f"  Using minibatch_size=1 and unroll_simulation=1")
-    else:
-        nengo_dl.configure_settings(stateful=False)
-        print(f"  Using minibatch_size: {actual_batch_size}")
-    
-    sim = nengo_dl.Simulator(net, minibatch_size=actual_batch_size)
+    sim = nengo_dl.Simulator(net, minibatch_size=None)
 
     print("Compiling model...")
     sim.compile(
@@ -91,7 +79,7 @@ def train_model(
     if checkpoint_dir is not None:
         checkpoint_dir = Path(checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        params_file = checkpoint_dir / "snn_params.npz"
+        params_file = checkpoint_dir / "snn_params"
         print(f"Saving model to {params_file}...")
         sim.save_params(str(params_file))
 
@@ -116,7 +104,7 @@ def evaluate_model(
         y_test: Test labels one-hot encoded (n_samples, n_classes)
         
     Returns:
-        Test accuracy
+        Test loss
     """
     X_test_reshaped = X_test[:, np.newaxis, :]
     y_test_reshaped = y_test[:, np.newaxis, :] if len(y_test.shape) == 2 else y_test
@@ -126,10 +114,10 @@ def evaluate_model(
         metrics={p_out: ["accuracy"]},
     )
     
-    loss, acc = sim.evaluate(
+    evl = sim.evaluate(
         {inp: X_test_reshaped},
         {p_out: y_test_reshaped},
         verbose=0,
     )
     
-    return acc
+    return evl["loss"]
