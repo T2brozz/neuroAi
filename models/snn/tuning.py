@@ -95,9 +95,7 @@ def tune_hyperparameters(
     n_classes: int,
     max_epochs: int = 5,
     num_samples: int = 20,
-    directory: Path | str = "tuner_results",
     project_name: str = "snn_ray_tune",
-    seed: Optional[int] = None,
 ) -> Tuple[Dict[str, Any], "ray.tune.ExperimentAnalysis"]:
     """Run Ray Tune-based hyperparameter search and return the best config.
 
@@ -105,12 +103,20 @@ def tune_hyperparameters(
     """
     if not ray.is_initialized():
         print("[Ray Tune] Initializing Ray runtime...")
-        ray.init(ignore_reinit_error=True, include_dashboard=False)
+        # local_mode=True runs Ray Tune in-process, which is much more
+        # stable inside Jupyter notebooks and with libraries that use
+        # heavy native code (TensorFlow, nengo_dl).
+        ray.init(
+            ignore_reinit_error=True,
+            include_dashboard=False,
+            local_mode=True,
+            num_cpus=1,
+            log_to_driver=True,
+        )
 
     print("[Ray Tune] Preparing hyperparameter search...")
     print(f"  max_epochs      = {max_epochs}")
     print(f"  num_samples     = {num_samples}")
-    print(f"  local_dir       = {directory}")
     print(f"  project_name    = {project_name}")
 
     # Define search space
@@ -122,7 +128,7 @@ def tune_hyperparameters(
         "n_features": n_features,
         "n_classes": n_classes,
         "epochs": max_epochs,
-        "n_neurons_hidden": tune.randint(50, 257),  # 50-256
+        "n_neurons_hidden": tune.randint(50, 257),
         "synapse": tune.uniform(0.001, 0.05),
         "learning_rate": tune.loguniform(1e-4, 1e-2),
         "batch_size": tune.choice([16, 32, 64]),

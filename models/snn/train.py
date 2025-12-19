@@ -3,9 +3,6 @@ import tensorflow as tf
 import nengo_dl
 from pathlib import Path
 
-from models.snn.factory import build_snn
-
-
 def train_model(
     net,
     inp,
@@ -18,6 +15,9 @@ def train_model(
     batch_size: int = 32,
     learning_rate: float = 1e-3,
     checkpoint_dir: Path = None,
+    use_early_stopping: bool = True,
+    early_stopping_patience: int = 3,
+    early_stopping_min_delta: float = 0.0,
 ) -> tuple[tf.keras.callbacks.History, nengo_dl.Simulator]:
     """
     Train a spiking neural network.
@@ -34,6 +34,9 @@ def train_model(
         batch_size: Batch size for training
         learning_rate: Learning rate for optimizer
         checkpoint_dir: Directory to save checkpoints
+        use_early_stopping: Whether to enable early stopping based on validation loss
+        early_stopping_patience: Number of epochs with no improvement before stopping
+        early_stopping_min_delta: Minimum change in the monitored quantity to qualify as improvement
         
     Returns:
         Tuple of (training history, simulator)
@@ -60,6 +63,23 @@ def train_model(
     val_data = None
     if X_val is not None and y_val is not None:
         val_data = ({inp: X_val_reshaped}, {p_out: y_val_reshaped})
+
+    # Configure callbacks (early stopping if validation data is available)
+    callbacks = []
+    if use_early_stopping and val_data is not None:
+        print(
+            f"Using EarlyStopping on 'val_loss' with "
+            f"patience={early_stopping_patience}, min_delta={early_stopping_min_delta}"
+        )
+        callbacks.append(
+            tf.keras.callbacks.EarlyStopping(
+                monitor="val_loss",
+                patience=early_stopping_patience,
+                min_delta=early_stopping_min_delta,
+                restore_best_weights=True,
+                verbose=1,
+            )
+        )
     
     print(f"\nTraining for {epochs} epochs...")
     print(f"  Input shape: {X_train_reshaped.shape}")
@@ -69,6 +89,7 @@ def train_model(
         {inp: X_train_reshaped},
         {p_out: y_train_reshaped},
         validation_data=val_data,
+        callbacks=callbacks if callbacks else None,
         epochs=epochs,
         verbose=1,
     )
