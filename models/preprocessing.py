@@ -232,7 +232,7 @@ def load_dataset(data_dir: Path,
                 filter_activity: bool = False,
                 activity_window_ms: int = 100,
                 activity_min_events: int = 10,
-                event_window_ms: int = None) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+                event_window_ms: int|None = None) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
     Load all event files and convert to features.
     
