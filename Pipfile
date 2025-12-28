@@ -21,6 +21,7 @@ scipy = "*"
 tensorflow = "==2.8.0"
 scikit-learn = "*"
 ray = {extras = ["tune"], version = "*"}
+keras = "*"
 
 [dev-packages]
 
