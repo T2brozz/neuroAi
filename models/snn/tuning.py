@@ -9,7 +9,7 @@ import ray
 from ray import tune
 
 from models.snn.factory import build_snn
-from models.snn.train import train_model
+from models.snn.train import train_model, evaluate_model
 
 
 def _ray_trainable(config: Dict[str, Any]) -> None:
@@ -29,7 +29,8 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
     n_classes: int = config["n_classes"]
 
     n_hidden = int(config["n_neurons_hidden"])
-    syn = float(config["synapse"])
+    syn_fast = float(config["synapse_fast"])
+    syn_slow = float(config["synapse_slow"])
     learning_rate = float(config["learning_rate"])
     batch_size = int(config["batch_size"])
     epochs = int(config.get("epochs", 5))
@@ -37,7 +38,8 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
     print("\n" + "=" * 80)
     print("[Ray Tune] Starting trial with configuration:")
     print(f"  hidden={n_hidden}")
-    print(f"  synapse={syn}")
+    print(f"  synapse_fast={syn_fast}")
+    print(f"  synapse_slow={syn_slow}")
     print(f"  learning_rate={learning_rate:.2e}")
     print(f"  batch_size={batch_size}")
     print(f"  epochs={epochs}")
@@ -47,41 +49,39 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
         n_features=n_features,
         n_classes=n_classes,
         n_neurons_hidden=n_hidden,
-        synapse=syn,
+        synapse_fast=syn_fast,
+        synapse_slow=syn_slow
     )
 
     # Train using the shared training function
+    # Disable early stopping and validation data for Ray Tune to avoid serialization issues
     history, sim = train_model(
         net=net,
         inp=inp,
         p_out=p_out,
         X_train=X_train,
         y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
+        X_val=None,  # Don't pass validation data to avoid Ray serialization issues
+        y_val=None,
         epochs=epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
         checkpoint_dir=None,
+        use_early_stopping=False,  # Disable early stopping for Ray Tune trials
     )
+    
+    # Evaluate on validation set using evaluate_model function
+    val_results = evaluate_model(sim, inp, p_out, X_val, y_val)
+    
+    # Find the accuracy key (it contains 'accuracy' in the name)
+    accuracy_key = [k for k in val_results.keys() if 'accuracy' in k][0]
+    val_acc = float(val_results[accuracy_key])
 
-    # Get best validation accuracy if available
-    val_acc = None
-    for key, values in history.history.items():
-        if key.startswith("val_") and "accuracy" in key:
-            val_acc = float(max(values))
-            break
-
-    if val_acc is None:
-        raise RuntimeError(
-            f"Could not find a validation accuracy metric in history keys: "
-            f"{list(history.history.keys())}"
-        )
-
-    print(f"[Ray Tune] Trial finished with best val_accuracy={val_acc:.4f}")
+    print(f"[Ray Tune] Trial finished with val_accuracy={val_acc:.4f}")
 
     # Report result to Ray Tune
-    tune.report(val_accuracy=val_acc)
+    tune.report(metrics={ "val_accuracy": float(val_acc) })
+    
 
     sim.close()
 
@@ -129,7 +129,8 @@ def tune_hyperparameters(
         "n_classes": n_classes,
         "epochs": max_epochs,
         "n_neurons_hidden": tune.randint(50, 257),
-        "synapse": tune.uniform(0.001, 0.05),
+        "synapse_fast": tune.uniform(0.001, 0.01),   # fast integration for event bins
+        "synapse_slow": tune.uniform(0.01, 0.1),     # slower memory in recurrence
         "learning_rate": tune.loguniform(1e-4, 1e-2),
         "batch_size": tune.choice([16, 32, 64]),
     }
@@ -144,7 +145,6 @@ def tune_hyperparameters(
         mode="max",
         name=project_name,
         resources_per_trial={"cpu": 1},
-        verbose=1,
     )
 
     best_config = analysis.get_best_config(metric="val_accuracy", mode="max")

@@ -50,7 +50,7 @@ def train_model(
     sim.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
         loss={p_out: tf.keras.losses.CategoricalCrossentropy(from_logits=True)},
-        metrics={p_out: ["accuracy"]},
+        metrics={p_out: ["accuracy"]}
     )
 
     # Reshape data for nengo_dl: (batch, time, features)
@@ -90,8 +90,7 @@ def train_model(
         {p_out: y_train_reshaped},
         validation_data=val_data,
         callbacks=callbacks if callbacks else None,
-        epochs=epochs,
-        verbose=1,
+        epochs=epochs
     )
 
     print("\nTraining complete!")
@@ -132,13 +131,12 @@ def evaluate_model(
     
     sim.compile(
         loss={p_out: tf.keras.losses.CategoricalCrossentropy(from_logits=True)},
-        metrics={p_out: ["accuracy"]},
+        metrics={p_out: ["accuracy"]}
     )
     
     evl = sim.evaluate(
         {inp: X_test_reshaped},
-        {p_out: y_test_reshaped},
-        verbose=0,
+        {p_out: y_test_reshaped}
     )
     
-    return evl["loss"]
+    return evl

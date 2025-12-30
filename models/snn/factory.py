@@ -6,63 +6,69 @@ def build_snn(
     n_features: int,
     n_classes: int,
     n_neurons_hidden: int = 200,
-    synapse: float = 0.01,
+    synapse_fast: float = 0.005,   # fast integration for event bins
+    synapse_slow: float = 0.03,    # slower memory in recurrence
+    use_linear_readout: bool = True,
+    seed: int | None = 42,
 ) -> Tuple[nengo.Network, nengo.Node, nengo.Probe]:
-    """
-    Build a simple SNN with dimensionality reduction for high-dimensional input.
 
-    Architecture:
-    - Input (n_features) -> Dimensionality reduction layer (128 dims)
-    - Hidden recurrent ensemble (256 neurons, 128 dims)
-    - Output ensemble (n_classes dims)
-    """
-    rng = np.random.default_rng()
-    
-    # For high-dimensional input, use a bottleneck
+    rng = np.random.default_rng(seed)
+
     reduced_dim = min(128, max(n_features // 10, 64))
 
-    with nengo.Network() as net:
-        # Input node - nengo_dl will feed data directly to this
-        # size_in=0 means this is a pure input node (for nengo_dl)
-        inp = nengo.Node(np.zeros(n_features))
+    with nengo.Network(seed=seed) as net:
+        # Input node: size_in=0 means it's an input (receives data from outside)
+        inp = nengo.Node(output=np.zeros(n_features))
 
-        # Dimensionality reduction layer (fixed random projection)
-        reduction_transform = rng.normal(0.0, 1.0 / np.sqrt(n_features), (reduced_dim, n_features))
+        # Random projection (fixed)
+        reduction_transform = rng.normal(
+            0.0, 1.0 / np.sqrt(n_features), (reduced_dim, n_features)
+        )
+
         reduced = nengo.Ensemble(
             n_neurons=128,
             dimensions=reduced_dim,
             neuron_type=nengo.LIF(),
         )
-        # Connect input node directly to reduced ensemble
-        nengo.Connection(inp, reduced, synapse=0.01, transform=reduction_transform)
+        nengo.Connection(inp, reduced, synapse=synapse_fast, transform=reduction_transform)
 
-        # Hidden recurrent ensemble for temporal dynamics
         hidden = nengo.Ensemble(
             n_neurons=n_neurons_hidden,
             dimensions=reduced_dim,
             neuron_type=nengo.LIF(),
         )
 
-        # Recurrent connection with small random weights
-        recur_transform = rng.normal(0.0, 1.0 / np.sqrt(reduced_dim), (reduced_dim, reduced_dim))
-        nengo.Connection(hidden, hidden, synapse=synapse, transform=recur_transform)
-
-        # Reduced to hidden connection
-        hidden_transform = rng.normal(0.0, 1.0 / np.sqrt(reduced_dim), (reduced_dim, reduced_dim))
-        nengo.Connection(reduced, hidden, synapse=None, transform=hidden_transform)
-
-        # Output ensemble
-        out = nengo.Ensemble(
-            n_neurons=2 * n_classes,
-            dimensions=n_classes,
-            neuron_type=nengo.LIF(),
+        # Reduced -> hidden should usually be filtered for event streams
+        hidden_transform = rng.normal(
+            0.0, 1.0 / np.sqrt(reduced_dim), (reduced_dim, reduced_dim)
         )
+        nengo.Connection(reduced, hidden, synapse=synapse_fast, transform=hidden_transform)
 
-        # Hidden to output with random weights
-        hid_out_transform = rng.normal(0.0, np.sqrt(2.0 / (reduced_dim + n_classes)), (n_classes, reduced_dim))
-        nengo.Connection(hidden, out, synapse=synapse, transform=hid_out_transform)
+        # Stable-ish recurrence: start with a scaled identity + small noise
+        # (acts like leaky memory rather than chaotic reservoir)
+        recur = 0.7 * np.eye(reduced_dim) + 0.05 * rng.normal(
+            0.0, 1.0 / np.sqrt(reduced_dim), (reduced_dim, reduced_dim)
+        )
+        nengo.Connection(hidden, hidden, synapse=synapse_slow, transform=recur)
 
-        p_out = nengo.Probe(out, synapse=None)
+        if use_linear_readout:
+            # Linear readout Node (easy to train / interpret)
+            out = nengo.Node(size_in=n_classes)
+            # Start with small weights; train later (NengoDL / offline regression / PES)
+            w = rng.normal(0.0, 0.01, (n_classes, reduced_dim))
+            nengo.Connection(hidden, out, synapse=synapse_fast, transform=w)
+            p_out = nengo.Probe(out, synapse=None)
+        else:
+            # Spiking output (works, but training can be fussier)
+            out = nengo.Ensemble(
+                n_neurons=2 * n_classes,
+                dimensions=n_classes,
+                neuron_type=nengo.LIF(),
+            )
+            hid_out_transform = rng.normal(
+                0.0, np.sqrt(2.0 / (reduced_dim + n_classes)), (n_classes, reduced_dim)
+            )
+            nengo.Connection(hidden, out, synapse=synapse_fast, transform=hid_out_transform)
+            p_out = nengo.Probe(out, synapse=None)
 
     return net, inp, p_out
-
