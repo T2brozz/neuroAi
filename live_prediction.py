@@ -5,7 +5,9 @@ import dv_processing as dv
 
 # TODO: Add your model imports here
 # import tensorflow as tf  # for CNN
-# from models.snn import load_snn_model  # for SNN
+from models.snn.predict import load_snn_model  # for SNN
+from models.event_types import dv_store_to_numpy, EVENT_DTYPE
+from models.preprocessing import events_to_features
 
 # Open the camera, just use first detected DAVIS camera
 camera = dv.io.camera.DAVIS()
@@ -30,7 +32,7 @@ noise_filter = dv.noise.BackgroundActivityNoiseFilter(
 
 # TODO: Load your trained models
 # cnn_model = tf.keras.models.load_model('path/to/cnn_model')
-# snn_model = load_snn_model('checkpoints/snn/snn_params.npz')
+snn_model = load_snn_model('checkpoints/snn/snn_params.npz', 'checkpoints/snn/best_hparams.env')
 
 def compute_event_centroid(events):
     """Compute the centroid of events for label placement"""
@@ -52,10 +54,39 @@ def preprocess_events_for_cnn(events):
     pass
 
 def preprocess_events_for_snn(events):
-    """Convert events to format suitable for SNN inference"""
-    # TODO: Implement preprocessing based on your SNN input requirements
-    # This might involve spike encoding, temporal binning, etc.
-    pass
+    """Convert events to format suitable for SNN inference.
+
+    This uses the same histogram-based feature extraction as the offline
+    preprocessing pipeline (models.preprocessing.events_to_features).
+    """
+    # Handle empty / None input
+    if events is None:
+        return None
+
+    # dv.EventStore may not support len() directly in all contexts, so be safe
+    if len(events) == 0:
+        return None
+
+    # Convert dv_processing EventStore or iterable of events to structured numpy
+    structured = dv_store_to_numpy(events)
+
+    if structured.size == 0:
+        return None
+
+    # Use camera resolution so features match sensor size
+    res = camera.getEventResolution()
+    width, height = res.width, res.height
+
+    # Use same defaults as in models.preprocessing.events_to_features
+    features = events_to_features(
+        structured,
+        method="histogram",
+        width=width,
+        height=height,
+        n_bins=10,
+    )
+
+    return features.astype(np.float32)
 
 def classify_events(events):
     """Run both CNN and SNN classification on events"""
@@ -68,14 +99,13 @@ def classify_events(events):
         # cnn_prediction = cnn_model.predict(cnn_input)
         # cnn_result = f"CNN: {get_class_name(cnn_prediction)}"
         
-        # snn_input = preprocess_events_for_snn(events)
-        # snn_prediction = snn_model.predict(snn_input)
-        # snn_result = f"SNN: {get_class_name(snn_prediction)}"
+        snn_input = preprocess_events_for_snn(events)
+        snn_prediction = snn_model.predict(snn_input)
+        snn_result = f"SNN: {snn_prediction}"
         
         # Placeholder classifications for testing
         cnn_result = "CNN: Person"
-        snn_result = "SNN: Person"
-    
+            
     return cnn_result, snn_result
 
 # Callback method for time based slicing
