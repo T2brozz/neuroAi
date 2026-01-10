@@ -2,6 +2,10 @@ from datetime import timedelta, datetime
 import numpy as np
 import cv2 as cv
 import dv_processing as dv
+import threading
+import queue
+import time
+from collections import deque
 
 # TODO: Add your model imports here
 # import tensorflow as tf  # for CNN
@@ -41,6 +45,15 @@ noise_filter = dv.noise.BackgroundActivityNoiseFilter(
 # TODO: Load your trained models
 # cnn_model = tf.keras.models.load_model('path/to/cnn_model')
 snn_model = load_snn_model(Path('checkpoints/snn/snn_params'), Path('checkpoints/snn/best_hparams.env'))
+
+# Threading setup for async classification
+classification_queue = queue.Queue(maxsize=1)  # Only keep latest events
+result_lock = threading.Lock()
+current_classification = {"cnn": "CNN: None", "snn": "SNN: None", "timestamp": time.time()}
+classification_running = threading.Event()
+classification_running.set()
+fps_history = deque(maxlen=30)
+last_fps_time = time.time()
 
 def _log_classification(model: str, label: str) -> None:
     """Append a classification to the log file for any model.
@@ -101,29 +114,21 @@ def preprocess_events_for_cnn(events):
     pass
 
 def preprocess_events_for_snn(events):
-    """Convert events to format suitable for SNN inference.
-
-    This uses the same time-surface feature extraction as the offline
-    preprocessing pipeline (models.preprocessing.events_to_features).
-    """
+    """Convert events to format suitable for SNN inference - OPTIMIZED VERSION"""
     # Handle empty / None input
-    if events is None:
+    if events is None or len(events) == 0:
         return None
 
-    # dv.EventStore may not support len() directly in all contexts, so be safe
-    if len(events) == 0:
-        return None
-
-    # Convert dv_processing EventStore or iterable of events to structured numpy
+    # Convert dv_processing EventStore to structured numpy
     structured = dv_store_to_numpy(events)
 
     if structured.size == 0:
         return None
 
-    # Use camera resolution so features match sensor size
+    # Use camera resolution
     width, height = _event_resolution_wh()
 
-    # Use same defaults as in models.preprocessing.events_to_features
+    # Use time_surface feature extraction
     features = events_to_features(
         structured,
         method="time_surface",
@@ -131,7 +136,7 @@ def preprocess_events_for_snn(events):
         height=height,
     )
 
-    features = features.astype(np.float32)
+    features = features.astype(np.float32, copy=False)
 
     # Adapt feature length to match trained model if needed
     expected_len = getattr(snn_model, "n_features", None)
@@ -152,125 +157,162 @@ def preprocess_events_for_snn(events):
         else:
             # Find factor pair close to current aspect ratio
             aspect = width / height if height > 0 else 1.0
-            best_h, best_w, best_err = None, None, float("inf")
-            h_start = int(np.sqrt(area / max(aspect, 1e-6)))
-            h_start = max(1, h_start)
-            for h_try in range(h_start, 0, -1):
-                if area % h_try != 0:
-                    continue
-                w_try = area // h_try
-                err = abs((w_try / h_try) - aspect)
-                if err < best_err:
-                    best_err, best_h, best_w = err, h_try, w_try
-                # Stop early if exact aspect match
-                if err < 1e-6:
-                    break
-            target_h = best_h if best_h is not None else height
-            target_w = best_w if best_w is not None else width
+            target_h = int(np.sqrt(area / max(aspect, 1e-6)))
+            target_w = area // target_h if target_h > 0 else width
 
-        # Resize each polarity channel to target dims
-        pos_resized = cv.resize(pos, (int(target_w), int(target_h)), interpolation=cv.INTER_LINEAR)
-        neg_resized = cv.resize(neg, (int(target_w), int(target_h)), interpolation=cv.INTER_LINEAR)
-        features_resized = np.concatenate([pos_resized.flatten(), neg_resized.flatten()]).astype(np.float32)
-        features = features_resized
+        # Resize using INTER_NEAREST for speed
+        pos_resized = cv.resize(pos, (int(target_w), int(target_h)), interpolation=cv.INTER_NEAREST)
+        neg_resized = cv.resize(neg, (int(target_w), int(target_h)), interpolation=cv.INTER_NEAREST)
+        features = np.concatenate([pos_resized.flatten(), neg_resized.flatten()], dtype=np.float32)
 
     return features
 
-def classify_events(events):
-    """Run both CNN and SNN classification on events"""
-    cnn_result = "CNN: None"  # Default
-    snn_result = "SNN: None"  # Default
+def classification_worker():
+    """Background thread that processes classification requests"""
+    print("Classification worker thread started")
     
-    if len(events) > 0:
-        # TODO: Implement actual classification
-        # cnn_input = preprocess_events_for_cnn(events)
-        # cnn_prediction = cnn_model.predict(cnn_input)
-        # cnn_result = f"CNN: {get_class_name(cnn_prediction)}"
-        
-        snn_input = preprocess_events_for_snn(events)
-        if snn_input is not None:
-            snn_prediction = predict_snn(snn_model, features=snn_input)
-            snn_result = f"SNN: {_parse_prediction(snn_prediction)}"
-        
-        # Placeholder classifications for testing
-        # cnn_result = "CNN: Person"
+    while classification_running.is_set():
+        try:
+            # Get events from queue with timeout
+            events = classification_queue.get(timeout=0.1)
             
-    return cnn_result, snn_result
+            if events is None:
+                continue
+            
+            # Perform classification
+            cnn_result = "CNN: None"
+            snn_result = "SNN: None"
+            
+            if len(events) > 0:
+                snn_input = preprocess_events_for_snn(events)
+                if snn_input is not None:
+                    snn_prediction = predict_snn(snn_model, features=snn_input)
+                    snn_result = f"SNN: {_parse_prediction(snn_prediction)}"
+                    
+                    # Log classification
+                    if ":" in snn_result:
+                        model, label = snn_result.split(":", 1)
+                        _log_classification(model.strip(), label.strip())
+            
+            # Update shared results
+            with result_lock:
+                current_classification["cnn"] = cnn_result
+                current_classification["snn"] = snn_result
+                current_classification["timestamp"] = time.time()
+            
+            classification_queue.task_done()
+            
+        except queue.Empty:
+            continue
+        except Exception as e:
+            print(f"Classification error: {e}")
+            continue
+    
+    print("Classification worker thread stopped")
 
 # Callback method for time based slicing
 def process_events(events):
-    original_count = len(events)
-    print(f"Received {original_count} events")
+    """OPTIMIZED event processing with async classification"""
+    global last_fps_time
     
-    # Apply dv_processing noise filter using the correct pattern
+    # FPS tracking
+    current_time = time.time()
+    frame_time = current_time - last_fps_time
+    if frame_time > 0:
+        fps_history.append(1.0 / frame_time)
+    last_fps_time = current_time
+    avg_fps = np.mean(fps_history) if len(fps_history) > 0 else 0
+    
+    original_count = len(events)
+    
+    # Apply noise filter (fast operation)
     noise_filter.accept(events)
     filtered_events = noise_filter.generateEvents()
     filtered_count = len(filtered_events) if filtered_events is not None else 0
     
-    # Get filter reduction factor
-    reduction_factor = noise_filter.getReductionFactor()
-    print(f"After noise filtering: {filtered_count} events (reduction factor: {reduction_factor:.3f})")
-    
-    # Use filtered events for further processing
+    # Use filtered events
     events_to_process = filtered_events if filtered_events is not None and len(filtered_events) > 0 else events
     
-    # Generate event visualization
+    # Submit to classification thread (non-blocking)
+    # Only submit if queue is empty (drop frames if classifier is busy)
+    if classification_queue.empty() and len(events_to_process) > 0:
+        try:
+            classification_queue.put_nowait(events_to_process)
+        except queue.Full:
+            pass  # Skip this frame if queue is full
+    
+    # Generate visualization (fast operation)
     event_image = visualizer.generateImage(events_to_process)
     
-    # Get classification results using filtered events
-    cnn_result, snn_result = classify_events(events_to_process)
-
-    # Log any confident classifications (CNN & SNN)
-    for result in (cnn_result, snn_result):
-        if isinstance(result, str) and ":" in result:
-            model, label = result.split(":", 1)
-            _log_classification(model.strip(), label.strip())
+    # Get current classification results (cached from background thread)
+    with result_lock:
+        cnn_result = current_classification["cnn"]
+        snn_result = current_classification["snn"]
+        classification_age = current_time - current_classification["timestamp"]
     
-    # Compute centroid for label placement using filtered events
-    centroid = compute_event_centroid(events_to_process)
+    # Add text overlays (fixed positions for performance)
+    font = cv.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.7
+    thickness = 2
     
-    if centroid is not None:
-        # Draw classification results at centroid
-        cv.circle(event_image, centroid, 5, (255, 255, 255), -1)  # White dot at centroid
-        
-        # Add text labels
-        font = cv.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.6
-        thickness = 2
-        
-        # CNN result (above centroid)
-        cv.putText(event_image, cnn_result, 
-                  (centroid[0] - 50, centroid[1] - 20), 
-                  font, font_scale, (0, 255, 0), thickness)
-        
-        # SNN result (below centroid)
-        cv.putText(event_image, snn_result, 
-                  (centroid[0] - 50, centroid[1] + 20), 
-                  font, font_scale, (0, 0, 255), thickness)
+    # FPS counter (top left)
+    cv.putText(event_image, f"FPS: {avg_fps:.1f}", 
+              (10, 30), font, font_scale, (0, 255, 0), thickness)
     
-    # Add filtering statistics
-    cv.putText(event_image, f"Raw Events: {original_count}", 
-              (10, 30), cv.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    cv.putText(event_image, f"Filtered: {filtered_count}", 
-              (10, 60), cv.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    # Event count (top left, below FPS)
+    cv.putText(event_image, f"Events: {filtered_count}/{original_count}", 
+              (10, 60), font, 0.6, (255, 255, 255), 1)
     
-    # Show filter reduction factor
-    cv.putText(event_image, f"Reduction Factor: {reduction_factor:.3f}", 
-              (10, 90), cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    # Classification age indicator (top left, below event count)
+    if classification_age < 1.0:
+        age_color = (0, 255, 0)  # Green = fresh
+    elif classification_age < 2.0:
+        age_color = (0, 255, 255)  # Yellow = slightly old
+    else:
+        age_color = (0, 0, 255)  # Red = stale
+    cv.putText(event_image, f"Class age: {classification_age:.1f}s", 
+              (10, 90), font, 0.5, age_color, 1)
+    
+    # SNN classification (bottom left)
+    cv.putText(event_image, snn_result, 
+              (10, event_image.shape[0] - 30), 
+              font, font_scale, (0, 0, 255), thickness)
+    
+    # CNN classification (bottom left, above SNN)
+    cv.putText(event_image, cnn_result, 
+              (10, event_image.shape[0] - 60), 
+              font, font_scale, (0, 255, 0), thickness)
     
     # Display the image
     cv.imshow("Event Stream - Person Classification", event_image)
     
-    # Exit on ESC key
-    if cv.waitKey(1) == 27:
+    # Exit on ESC key (non-blocking)
+    if cv.waitKey(1) & 0xFF == 27:
+        classification_running.clear()  # Signal classification thread to stop
         cv.destroyAllWindows()
         exit(0)
 
+# Start classification worker thread
+classification_running.set()
+classification_thread = threading.Thread(target=classification_worker, daemon=True)
+classification_thread.start()
+print("Classification worker thread started")
+
 # Register a job to be performed every 33 milliseconds (30 FPS)
-slicer.doEveryTimeInterval(timedelta(milliseconds=100), process_events)
+slicer.doEveryTimeInterval(timedelta(milliseconds=33), process_events)
 
 # Continue the loop while camera is connected
-while camera.isRunning():
-    events = camera.getNextEventBatch()
-    if events is not None:
-        slicer.accept(events)
+try:
+    while camera.isRunning():
+        events = camera.getNextEventBatch()
+        if events is not None:
+            slicer.accept(events)
+except KeyboardInterrupt:
+    print("\nStopping...")
+finally:
+    # Clean shutdown
+    classification_running.clear()
+    cv.destroyAllWindows()
+    print("Waiting for classification thread to finish...")
+    classification_thread.join(timeout=2.0)
+    print("Done!")
