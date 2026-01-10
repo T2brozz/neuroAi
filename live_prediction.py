@@ -14,7 +14,7 @@ from pathlib import Path
 label_names = ['mark', 'marvin', 'yannes']
 
 # Log file path for non-uncertain classifications
-LOG_PATH = Path(f"logs/{datetime.now().strftime("live_predictions_%Y%m%d_%H%M%S.log")}")
+LOG_PATH = Path(f'logs/{datetime.now().strftime("live_predictions_%Y%m%d_%H%M%S.log")}')
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Open the camera, just use first detected DAVIS camera
