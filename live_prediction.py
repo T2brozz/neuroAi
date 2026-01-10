@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import timedelta, datetime
 import numpy as np
 import cv2 as cv
 import dv_processing as dv
@@ -10,6 +10,12 @@ from models.event_types import dv_store_to_numpy, EVENT_DTYPE
 from models.preprocessing import events_to_features
 
 from pathlib import Path
+
+label_names = ['mark', 'marvin', 'yannes']
+
+# Log file path for non-uncertain classifications
+LOG_PATH = Path(f"logs/{datetime.now().strftime("live_predictions_%Y%m%d_%H%M%S.log")}")
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Open the camera, just use first detected DAVIS camera
 camera = dv.io.camera.DAVIS()
@@ -35,6 +41,36 @@ noise_filter = dv.noise.BackgroundActivityNoiseFilter(
 # TODO: Load your trained models
 # cnn_model = tf.keras.models.load_model('path/to/cnn_model')
 snn_model = load_snn_model(Path('checkpoints/snn/snn_params'), Path('checkpoints/snn/best_hparams.env'))
+
+def _log_classification(model: str, label: str) -> None:
+    """Append a classification to the log file for any model.
+
+    Only logs when label is not "Uncertain" or "None".
+    Output format: ISO8601 timestamp, model, label (TSV).
+    """
+    try:
+        if not model or not label or label in ("Uncertain", "None"):
+            return
+        timestamp = datetime.now().isoformat()
+        with LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(f"{timestamp}\t{model}\t{label}\n")
+    except Exception:
+        # Silently ignore logging errors to avoid interrupting the stream
+        pass
+
+def _parse_prediction(prediction: np.ndarray, confidence_threshold: float = 0.5) -> str:
+    """Convert model prediction to class name string"""
+    if prediction is None or len(prediction) == 0:
+        return "None"
+    
+    idx = np.argmax(prediction)
+    if idx < 0 or idx >= len(label_names):
+        return "None"
+    
+    if prediction[idx] < confidence_threshold:
+        return "Uncertain"
+    
+    return label_names[idx]
 
 def _event_resolution_wh():
     """Return (width, height) for event resolution across dv_processing variants."""
@@ -142,8 +178,8 @@ def preprocess_events_for_snn(events):
 
 def classify_events(events):
     """Run both CNN and SNN classification on events"""
-    cnn_result = "CNN: Unknown"  # Default
-    snn_result = "SNN: Unknown"  # Default
+    cnn_result = "CNN: None"  # Default
+    snn_result = "SNN: None"  # Default
     
     if len(events) > 0:
         # TODO: Implement actual classification
@@ -154,10 +190,10 @@ def classify_events(events):
         snn_input = preprocess_events_for_snn(events)
         if snn_input is not None:
             snn_prediction = predict_snn(snn_model, features=snn_input)
-            snn_result = f"SNN: {snn_prediction}"
+            snn_result = f"SNN: {_parse_prediction(snn_prediction)}"
         
         # Placeholder classifications for testing
-        cnn_result = "CNN: Person"
+        # cnn_result = "CNN: Person"
             
     return cnn_result, snn_result
 
@@ -183,6 +219,12 @@ def process_events(events):
     
     # Get classification results using filtered events
     cnn_result, snn_result = classify_events(events_to_process)
+
+    # Log any confident classifications (CNN & SNN)
+    for result in (cnn_result, snn_result):
+        if isinstance(result, str) and ":" in result:
+            model, label = result.split(":", 1)
+            _log_classification(model.strip(), label.strip())
     
     # Compute centroid for label placement using filtered events
     centroid = compute_event_centroid(events_to_process)
