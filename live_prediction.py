@@ -5,9 +5,11 @@ import dv_processing as dv
 
 # TODO: Add your model imports here
 # import tensorflow as tf  # for CNN
-from models.snn.predict import load_snn_model  # for SNN
+from models.snn.predict import load_snn_model, predict_snn  # for SNN
 from models.event_types import dv_store_to_numpy, EVENT_DTYPE
 from models.preprocessing import events_to_features
+
+from pathlib import Path
 
 # Open the camera, just use first detected DAVIS camera
 camera = dv.io.camera.DAVIS()
@@ -32,7 +34,16 @@ noise_filter = dv.noise.BackgroundActivityNoiseFilter(
 
 # TODO: Load your trained models
 # cnn_model = tf.keras.models.load_model('path/to/cnn_model')
-snn_model = load_snn_model('checkpoints/snn/snn_params.npz', 'checkpoints/snn/best_hparams.env')
+snn_model = load_snn_model(Path('checkpoints/snn/snn_params'), Path('checkpoints/snn/best_hparams.env'))
+
+def _event_resolution_wh():
+    """Return (width, height) for event resolution across dv_processing variants."""
+    res = camera.getEventResolution()
+    # Some versions return an object with width/height, others return a tuple
+    if hasattr(res, "width"):
+        return int(res.width), int(res.height)
+    # Assume tuple-like (w, h)
+    return int(res[0]), int(res[1])
 
 def compute_event_centroid(events):
     """Compute the centroid of events for label placement"""
@@ -56,7 +67,7 @@ def preprocess_events_for_cnn(events):
 def preprocess_events_for_snn(events):
     """Convert events to format suitable for SNN inference.
 
-    This uses the same histogram-based feature extraction as the offline
+    This uses the same time-surface feature extraction as the offline
     preprocessing pipeline (models.preprocessing.events_to_features).
     """
     # Handle empty / None input
@@ -74,19 +85,60 @@ def preprocess_events_for_snn(events):
         return None
 
     # Use camera resolution so features match sensor size
-    res = camera.getEventResolution()
-    width, height = res.width, res.height
+    width, height = _event_resolution_wh()
 
     # Use same defaults as in models.preprocessing.events_to_features
     features = events_to_features(
         structured,
-        method="histogram",
+        method="time_surface",
         width=width,
         height=height,
-        n_bins=10,
     )
 
-    return features.astype(np.float32)
+    features = features.astype(np.float32)
+
+    # Adapt feature length to match trained model if needed
+    expected_len = getattr(snn_model, "n_features", None)
+    if expected_len is not None and features.size != expected_len:
+        half = features.size // 2
+        pos = features[:half].reshape((height, width))
+        neg = features[half:].reshape((height, width))
+
+        # Compute target dimensions from expected_len (assume 2 channels)
+        area = expected_len // 2
+
+        # Prefer common sensors if exact match
+        target_w, target_h = None, None
+        if area == 640 * 480:
+            target_w, target_h = 640, 480
+        elif area == 346 * 260:
+            target_w, target_h = 346, 260
+        else:
+            # Find factor pair close to current aspect ratio
+            aspect = width / height if height > 0 else 1.0
+            best_h, best_w, best_err = None, None, float("inf")
+            h_start = int(np.sqrt(area / max(aspect, 1e-6)))
+            h_start = max(1, h_start)
+            for h_try in range(h_start, 0, -1):
+                if area % h_try != 0:
+                    continue
+                w_try = area // h_try
+                err = abs((w_try / h_try) - aspect)
+                if err < best_err:
+                    best_err, best_h, best_w = err, h_try, w_try
+                # Stop early if exact aspect match
+                if err < 1e-6:
+                    break
+            target_h = best_h if best_h is not None else height
+            target_w = best_w if best_w is not None else width
+
+        # Resize each polarity channel to target dims
+        pos_resized = cv.resize(pos, (int(target_w), int(target_h)), interpolation=cv.INTER_LINEAR)
+        neg_resized = cv.resize(neg, (int(target_w), int(target_h)), interpolation=cv.INTER_LINEAR)
+        features_resized = np.concatenate([pos_resized.flatten(), neg_resized.flatten()]).astype(np.float32)
+        features = features_resized
+
+    return features
 
 def classify_events(events):
     """Run both CNN and SNN classification on events"""
@@ -100,8 +152,9 @@ def classify_events(events):
         # cnn_result = f"CNN: {get_class_name(cnn_prediction)}"
         
         snn_input = preprocess_events_for_snn(events)
-        snn_prediction = snn_model.predict(snn_input)
-        snn_result = f"SNN: {snn_prediction}"
+        if snn_input is not None:
+            snn_prediction = predict_snn(snn_model, features=snn_input)
+            snn_result = f"SNN: {snn_prediction}"
         
         # Placeholder classifications for testing
         cnn_result = "CNN: Person"

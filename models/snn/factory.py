@@ -2,6 +2,15 @@ import nengo
 import numpy as np
 from typing import Tuple
 
+def _softmax_vec(x: np.ndarray) -> np.ndarray:
+    # numerically stable softmax
+    z = x - np.max(x)
+    e = np.exp(z)
+    return e / (np.sum(e) + 1e-12)
+
+def _softmax_node_fn(t, x):
+    return _softmax_vec(x)
+
 def build_snn(
     n_features: int,
     n_classes: int,
@@ -57,7 +66,11 @@ def build_snn(
             # Start with small weights; train later (NengoDL / offline regression / PES)
             w = rng.normal(0.0, 0.01, (n_classes, reduced_dim))
             nengo.Connection(hidden, out, synapse=synapse_fast, transform=w)
-            p_out = nengo.Probe(out, synapse=None)
+
+            # Softmax probabilities
+            probs = nengo.Node(_softmax_node_fn, size_in=n_classes, size_out=n_classes)
+            nengo.Connection(out, probs, synapse=None)
+            p_out = nengo.Probe(probs, synapse=None)
         else:
             # Spiking output (works, but training can be fussier)
             out = nengo.Ensemble(
@@ -69,6 +82,10 @@ def build_snn(
                 0.0, np.sqrt(2.0 / (reduced_dim + n_classes)), (n_classes, reduced_dim)
             )
             nengo.Connection(hidden, out, synapse=synapse_fast, transform=hid_out_transform)
-            p_out = nengo.Probe(out, synapse=None)
+
+            # Softmax over filtered spikes for stability
+            probs = nengo.Node(_softmax_node_fn, size_in=n_classes, size_out=n_classes)
+            nengo.Connection(out, probs, synapse=synapse_fast)
+            p_out = nengo.Probe(probs, synapse=None)
 
     return net, inp, p_out
