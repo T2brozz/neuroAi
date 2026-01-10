@@ -110,8 +110,9 @@ def tune_hyperparameters(
             ignore_reinit_error=True,
             include_dashboard=False,
             local_mode=True,
-            num_cpus=1,
+            num_cpus=3,
             log_to_driver=True,
+            
         )
 
     print("[Ray Tune] Preparing hyperparameter search...")
@@ -144,7 +145,7 @@ def tune_hyperparameters(
         metric="val_accuracy",
         mode="max",
         name=project_name,
-        resources_per_trial={"cpu": 1},
+        resources_per_trial={"cpu": 3},
     )
 
     best_config = analysis.get_best_config(metric="val_accuracy", mode="max")

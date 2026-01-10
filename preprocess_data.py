@@ -30,7 +30,7 @@ def main():
         'filter_activity': True,
         'activity_window_ms': 1000,
         'activity_min_events': 75000,
-        'event_window_ms': 2000,
+        'event_window_ms': 1000,
         'val_split': 0.2,
         'test_split': 0.1,
         'random_seed': 42,
