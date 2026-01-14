@@ -4,3 +4,4 @@ __pycache__/
 .ipynb_checkpoints
 *.npz
 logs/*.log
+notebooks/traditionalNN/runs
