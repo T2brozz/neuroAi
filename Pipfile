@@ -23,6 +23,7 @@ scikit-learn = "*"
 ray = {extras = ["tune"], version = "*"}
 keras = "*"
 tensorflow = {extras = ["and-cuda"], version = "*"}
+seaborn = "*"
 
 [dev-packages]
 
