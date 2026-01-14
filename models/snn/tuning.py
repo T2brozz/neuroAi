@@ -8,7 +8,7 @@ import tensorflow as tf
 import ray
 from ray import tune
 
-from models.snn.factory import build_snn
+from models.snn.factory import build_snn,build_simple_snn
 from models.snn.train import train_model, evaluate_model
 
 
@@ -19,7 +19,7 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
     - X_train, y_train, X_val, y_val: numpy arrays
     - n_features, n_classes: ints
     - epochs: int (training epochs for this trial)
-    - batch_size, learning_rate, n_neurons_hidden, synapse: hyperparameters
+    - batch_size, learning_rate, n_neurons_hidden: hyperparameters
     """
     X_train: np.ndarray = config["X_train"]
     y_train: np.ndarray = config["y_train"]
@@ -29,8 +29,6 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
     n_classes: int = config["n_classes"]
 
     n_hidden = int(config["n_neurons_hidden"])
-    syn_fast = float(config["synapse_fast"])
-    syn_slow = float(config["synapse_slow"])
     learning_rate = float(config["learning_rate"])
     batch_size = int(config["batch_size"])
     epochs = int(config.get("epochs", 5))
@@ -38,19 +36,17 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
     print("\n" + "=" * 80)
     print("[Ray Tune] Starting trial with configuration:")
     print(f"  hidden={n_hidden}")
-    print(f"  synapse_fast={syn_fast}")
-    print(f"  synapse_slow={syn_slow}")
     print(f"  learning_rate={learning_rate:.2e}")
     print(f"  batch_size={batch_size}")
     print(f"  epochs={epochs}")
 
     # Build network with current hyperparameters
-    net, inp, p_out = build_snn(
+    net, inp, p_out = build_simple_snn(
         n_features=n_features,
         n_classes=n_classes,
         n_neurons_hidden=n_hidden,
-        synapse_fast=syn_fast,
-        synapse_slow=syn_slow
+        synapse=None,  # No synaptic filtering for single timestep training
+        spiking=False,  # Use RectifiedLinear for gradient-based training
     )
 
     # Train using the shared training function
@@ -67,7 +63,7 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
         batch_size=batch_size,
         learning_rate=learning_rate,
         checkpoint_dir=None,
-        use_early_stopping=False,  # Disable early stopping for Ray Tune trials
+        use_early_stopping=True,  
     )
     
     # Evaluate on validation set using evaluate_model function
@@ -120,7 +116,7 @@ def tune_hyperparameters(
     print(f"  num_samples     = {num_samples}")
     print(f"  project_name    = {project_name}")
 
-    # Define search space
+    # Define search space (simplified for the new architecture)
     search_space = {
         "X_train": X_train,
         "y_train": y_train,
@@ -129,11 +125,9 @@ def tune_hyperparameters(
         "n_features": n_features,
         "n_classes": n_classes,
         "epochs": max_epochs,
-        "n_neurons_hidden": tune.randint(50, 257),
-        "synapse_fast": tune.uniform(0.001, 0.01),   # fast integration for event bins
-        "synapse_slow": tune.uniform(0.01, 0.1),     # slower memory in recurrence
+        "n_neurons_hidden": tune.randint(64, 257),
         "learning_rate": tune.loguniform(1e-4, 1e-2),
-        "batch_size": tune.choice([16, 32, 64]),
+        "batch_size": tune.choice([16, 32, 64, 128]),
     }
 
     print("[Ray Tune] Starting tuning run...")
@@ -145,7 +139,7 @@ def tune_hyperparameters(
         metric="val_accuracy",
         mode="max",
         name=project_name,
-        resources_per_trial={"cpu": 3},
+        resources_per_trial={"cpu": 1},
     )
 
     best_config = analysis.get_best_config(metric="val_accuracy", mode="max")

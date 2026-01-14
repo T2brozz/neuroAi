@@ -22,8 +22,8 @@ def main():
     
     # Configuration
     config = {
-        'feature_method': 'time_surface',  # 'histogram', 'rate', or 'time_surface'
-        'spatial_downsample': False,
+        'feature_method': 'histogram',  # 'histogram' works better for classification
+        'spatial_downsample': True,     # CRITICAL: reduce 640x480 -> 64x48
         'target_width': 64,
         'target_height': 48,
         'n_bins': 10, # of time bins for histogram/rate features

@@ -2,6 +2,81 @@ import nengo
 import numpy as np
 from typing import Tuple
 
+# Disable GPU to prevent TensorFlow/nengo_dl crashes when CUDA is unavailable
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
+print("TensorFlow running on CPU only")
+
+def build_simple_snn(
+    n_features: int,
+    n_classes: int,
+    n_neurons_hidden: int = 128,
+    synapse: float = None,
+    spiking: bool = False,
+    seed: int | None = 42,
+) -> Tuple[nengo.Network, nengo.Node, nengo.Probe]:
+    """
+    Build a minimal single-hidden-layer SNN for classification.
+
+    Architecture:
+        input (n_features) -> hidden neurons (ReLU) -> linear readout (n_classes)
+
+    This architecture follows nengo_dl best practices:
+    - Connect directly to .neurons for trainable weights
+    - Use RectifiedLinear for gradient-based training
+    - Use Glorot initialization via nengo_dl.dists
+
+    Args:
+        n_features: Number of input features.
+        n_classes: Number of output classes.
+        n_neurons_hidden: Number of neurons in hidden layer (default 128).
+        synapse: Synaptic filter time constant (None = no filtering).
+        spiking: If True, use LIF neurons; if False, use RectifiedLinear.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        (network, input_node, output_probe)
+    """
+    import nengo_dl
+    
+    # Choose neuron type - RectifiedLinear is differentiable and works with single timestep
+    if spiking:
+        neuron_type = nengo.LIF()
+    else:
+        neuron_type = nengo.RectifiedLinear()
+
+    with nengo.Network(seed=seed) as net:
+        # Configure defaults to match Keras-style dense layers
+        net.config[nengo.Ensemble].gain = nengo.dists.Choice([1])
+        net.config[nengo.Ensemble].bias = nengo.dists.Choice([0])
+        net.config[nengo.Connection].synapse = synapse
+        net.config[nengo.Connection].transform = nengo_dl.dists.Glorot()
+
+        # Input node
+        inp = nengo.Node(output=np.zeros(n_features))
+
+        # Hidden layer: connect directly to .neurons for trainable weights
+        # dimensions=1 is standard when connecting to neurons directly
+        hidden = nengo.Ensemble(
+            n_neurons=n_neurons_hidden,
+            dimensions=1,
+            neuron_type=neuron_type,
+        )
+        nengo.Connection(inp, hidden.neurons)
+
+        # Output layer: linear readout from hidden neurons
+        out = nengo.Node(size_in=n_classes)
+        nengo.Connection(hidden.neurons, out)
+
+        # Probe raw logits
+        p_out = nengo.Probe(out, synapse=None)
+
+    return net, inp, p_out
+
+
 def _softmax_vec(x: np.ndarray) -> np.ndarray:
     # numerically stable softmax
     z = x - np.max(x)
@@ -67,10 +142,8 @@ def build_snn(
             w = rng.normal(0.0, 0.01, (n_classes, reduced_dim))
             nengo.Connection(hidden, out, synapse=synapse_fast, transform=w)
 
-            # Softmax probabilities
-            probs = nengo.Node(_softmax_node_fn, size_in=n_classes, size_out=n_classes)
-            nengo.Connection(out, probs, synapse=None)
-            p_out = nengo.Probe(probs, synapse=None)
+            # Probe raw logits - NO softmax (blocks gradient flow)
+            p_out = nengo.Probe(out, synapse=None)
         else:
             # Spiking output (works, but training can be fussier)
             out = nengo.Ensemble(
@@ -83,9 +156,7 @@ def build_snn(
             )
             nengo.Connection(hidden, out, synapse=synapse_fast, transform=hid_out_transform)
 
-            # Softmax over filtered spikes for stability
-            probs = nengo.Node(_softmax_node_fn, size_in=n_classes, size_out=n_classes)
-            nengo.Connection(out, probs, synapse=synapse_fast)
-            p_out = nengo.Probe(probs, synapse=None)
+            # Probe raw output - NO softmax (blocks gradient flow)
+            p_out = nengo.Probe(out, synapse=synapse_fast)
 
     return net, inp, p_out

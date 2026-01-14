@@ -41,6 +41,10 @@ def train_model(
     Returns:
         Tuple of (training history, simulator)
     """
+    # Configure nengo_dl settings for efficient training
+    with net:
+        nengo_dl.configure_settings(stateful=False, use_loop=False)
+    
     print("Creating simulator...")
     actual_batch_size = min(batch_size, len(X_train))
     
@@ -49,6 +53,7 @@ def train_model(
     print("Compiling model...")
     sim.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+        # from_logits=True because network outputs raw logits (no softmax node)
         loss={p_out: tf.keras.losses.CategoricalCrossentropy(from_logits=True)},
         metrics={p_out: ["accuracy"]}
     )
@@ -130,6 +135,7 @@ def evaluate_model(
     y_test_reshaped = y_test[:, np.newaxis, :] if len(y_test.shape) == 2 else y_test
     
     sim.compile(
+        # from_logits=True because network outputs raw logits (no softmax node)
         loss={p_out: tf.keras.losses.CategoricalCrossentropy(from_logits=True)},
         metrics={p_out: ["accuracy"]}
     )
