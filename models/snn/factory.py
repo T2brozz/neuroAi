@@ -16,6 +16,7 @@ def build_simple_snn(
     n_neurons_hidden: int = 128,
     synapse: float = None,
     spiking: bool = False,
+    homogeneous: bool = True,
     seed: int | None = 42,
 ) -> Tuple[nengo.Network, nengo.Node, nengo.Probe]:
     """
@@ -35,6 +36,8 @@ def build_simple_snn(
         n_neurons_hidden: Number of neurons in hidden layer (default 128).
         synapse: Synaptic filter time constant (None = no filtering).
         spiking: If True, use LIF neurons; if False, use RectifiedLinear.
+        homogeneous: If True, all neurons have identical gains/biases (uniform).
+                     If False, use diverse neuron parameters (heterogeneous).
         seed: Random seed for reproducibility.
 
     Returns:
@@ -49,9 +52,18 @@ def build_simple_snn(
         neuron_type = nengo.RectifiedLinear()
 
     with nengo.Network(seed=seed) as net:
-        # Configure defaults to match Keras-style dense layers
-        net.config[nengo.Ensemble].gain = nengo.dists.Choice([1])
-        net.config[nengo.Ensemble].bias = nengo.dists.Choice([0])
+        # Configure neuron parameters based on homogeneous/heterogeneous setting
+        if homogeneous:
+            # Homogeneous: all neurons have identical gains and biases
+            net.config[nengo.Ensemble].gain = nengo.dists.Choice([1])
+            net.config[nengo.Ensemble].bias = nengo.dists.Choice([0])
+        else:
+            # Heterogeneous: diverse neuron parameters for richer dynamics
+            # Gains sampled from uniform distribution around 1
+            net.config[nengo.Ensemble].gain = nengo.dists.Uniform(0.5, 1.5)
+            # Biases sampled to create diverse activation thresholds
+            net.config[nengo.Ensemble].bias = nengo.dists.Uniform(-0.5, 0.5)
+        
         net.config[nengo.Connection].synapse = synapse
         net.config[nengo.Connection].transform = nengo_dl.dists.Glorot()
 

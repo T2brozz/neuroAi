@@ -14,6 +14,7 @@ def train_model(
     epochs: int = 10,
     batch_size: int = 32,
     learning_rate: float = 1e-3,
+    weight_decay: float = 0.0,
     checkpoint_dir: Path = None,
     use_early_stopping: bool = True,
     early_stopping_patience: int = 3,
@@ -33,6 +34,7 @@ def train_model(
         epochs: Number of training epochs
         batch_size: Batch size for training
         learning_rate: Learning rate for optimizer
+        weight_decay: L2 regularization strength (0.0 = no regularization)
         checkpoint_dir: Directory to save checkpoints
         use_early_stopping: Whether to enable early stopping based on validation loss
         early_stopping_patience: Number of epochs with no improvement before stopping
@@ -51,8 +53,36 @@ def train_model(
     sim = nengo_dl.Simulator(net, minibatch_size=None)
 
     print("Compiling model...")
+    # Use AdamW for weight decay (L2 regularization) if specified
+    if weight_decay > 0.0:
+        # Try different AdamW locations based on TensorFlow version
+        try:
+            # TF 2.11+
+            optimizer = tf.keras.optimizers.AdamW(
+                learning_rate=learning_rate,
+                weight_decay=weight_decay,
+            )
+        except AttributeError:
+            try:
+                # TF 2.9-2.10
+                optimizer = tf.keras.optimizers.experimental.AdamW(
+                    learning_rate=learning_rate,
+                    weight_decay=weight_decay,
+                )
+            except AttributeError:
+                # Fallback: use Adam with kernel_regularizer (requires model rebuild)
+                # For now, just warn and use Adam
+                print(f"  WARNING: AdamW not available, using Adam without weight decay")
+                optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+                weight_decay = 0.0
+        if weight_decay > 0.0:
+            print(f"  Using AdamW optimizer with weight_decay={weight_decay}")
+    else:
+        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+        print(f"  Using Adam optimizer")
+    
     sim.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+        optimizer=optimizer,
         # from_logits=True because network outputs raw logits (no softmax node)
         loss={p_out: tf.keras.losses.CategoricalCrossentropy(from_logits=True)},
         metrics={p_out: ["accuracy"]}

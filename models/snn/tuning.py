@@ -12,7 +12,7 @@ from models.snn.factory import build_snn,build_simple_snn
 from models.snn.train import train_model, evaluate_model
 
 
-def _ray_trainable(config: Dict[str, Any]) -> None:
+def _ray_trainable(config: Dict[str, Any], X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray) -> None:
     """Ray Tune trainable that uses the existing train_model function.
 
     Expects the following in the config:
@@ -21,16 +21,15 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
     - epochs: int (training epochs for this trial)
     - batch_size, learning_rate, n_neurons_hidden: hyperparameters
     """
-    X_train: np.ndarray = config["X_train"]
-    y_train: np.ndarray = config["y_train"]
-    X_val: np.ndarray = config["X_val"]
-    y_val: np.ndarray = config["y_val"]
     n_features: int = config["n_features"]
     n_classes: int = config["n_classes"]
 
     n_hidden = int(config["n_neurons_hidden"])
     learning_rate = float(config["learning_rate"])
     batch_size = int(config["batch_size"])
+    weight_decay = float(config.get("weight_decay", 0.0))
+    homogeneous = bool(config.get("homogeneous", True))
+    spiking = bool(config.get("spiking", False))
     epochs = int(config.get("epochs", 5))
 
     print("\n" + "=" * 80)
@@ -38,6 +37,8 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
     print(f"  hidden={n_hidden}")
     print(f"  learning_rate={learning_rate:.2e}")
     print(f"  batch_size={batch_size}")
+    print(f"  homogeneous={homogeneous}")
+    print(f"  spiking={spiking}")
     print(f"  epochs={epochs}")
 
     # Build network with current hyperparameters
@@ -46,7 +47,8 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
         n_classes=n_classes,
         n_neurons_hidden=n_hidden,
         synapse=None,  # No synaptic filtering for single timestep training
-        spiking=False,  # Use RectifiedLinear for gradient-based training
+        spiking=spiking,  # Use RectifiedLinear for gradient-based training
+        homogeneous=homogeneous,  # Test both uniform and diverse neuron parameters
     )
 
     # Train using the shared training function
@@ -63,7 +65,10 @@ def _ray_trainable(config: Dict[str, Any]) -> None:
         batch_size=batch_size,
         learning_rate=learning_rate,
         checkpoint_dir=None,
-        use_early_stopping=True,  
+        weight_decay=weight_decay,
+        use_early_stopping=True,
+        early_stopping_min_delta=0.001,
+        early_stopping_patience=10,
     )
     
     # Evaluate on validation set using evaluate_model function
@@ -97,19 +102,32 @@ def tune_hyperparameters(
 
     Returns a tuple of (best_config, analysis).
     """
-    if not ray.is_initialized():
-        print("[Ray Tune] Initializing Ray runtime...")
-        # local_mode=True runs Ray Tune in-process, which is much more
-        # stable inside Jupyter notebooks and with libraries that use
-        # heavy native code (TensorFlow, nengo_dl).
-        ray.init(
-            ignore_reinit_error=True,
-            include_dashboard=False,
-            local_mode=True,
-            num_cpus=3,
-            log_to_driver=True,
-            
-        )
+    # Determine project root (two levels up from this file: models/snn/tuning.py -> project root)
+    project_root = str(Path(__file__).resolve().parent.parent.parent)
+    
+    # Shutdown any existing Ray instance to avoid conflicts
+    if ray.is_initialized():
+        ray.shutdown()
+    
+    print("[Ray Tune] Initializing Ray runtime...")
+    print(f"  project_root    = {project_root}")
+    
+    # Configure runtime_env so Ray workers can find the 'models' module
+    runtime_env = {
+        "working_dir": project_root,
+        "env_vars": {
+            "PYTHONPATH": project_root,
+            "CUDA_VISIBLE_DEVICES": "-1",  # Disable GPU in workers
+        },
+    }
+    
+    ray.init(
+        ignore_reinit_error=True,
+        include_dashboard=False,
+        num_cpus=4,
+        log_to_driver=True,
+        runtime_env=runtime_env,
+    )
 
     print("[Ray Tune] Preparing hyperparameter search...")
     print(f"  max_epochs      = {max_epochs}")
@@ -118,28 +136,37 @@ def tune_hyperparameters(
 
     # Define search space (simplified for the new architecture)
     search_space = {
-        "X_train": X_train,
-        "y_train": y_train,
-        "X_val": X_val,
-        "y_val": y_val,
         "n_features": n_features,
         "n_classes": n_classes,
         "epochs": max_epochs,
         "n_neurons_hidden": tune.randint(64, 257),
         "learning_rate": tune.loguniform(1e-4, 1e-2),
         "batch_size": tune.choice([16, 32, 64, 128]),
+        "weight_decay": tune.loguniform(1e-5, 1e-3),
+        "homogeneous": tune.choice([True, False]),  # Test homogeneous vs heterogeneous
+        "spiking": tune.choice([True, False]),
     }
 
     print("[Ray Tune] Starting tuning run...")
 
-    analysis = tune.run(
+    # Use tune.with_parameters to pass large numpy arrays efficiently
+    trainable_with_params = tune.with_parameters(
         _ray_trainable,
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+    )
+
+    analysis = tune.run(
+        trainable_with_params,
         config=search_space,
         num_samples=num_samples,
         metric="val_accuracy",
         mode="max",
         name=project_name,
-        resources_per_trial={"cpu": 1},
+        resources_per_trial={"cpu": 4},
+        max_concurrent_trials=1,  # Run trials sequentially to avoid resource conflicts
     )
 
     best_config = analysis.get_best_config(metric="val_accuracy", mode="max")

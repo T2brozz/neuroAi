@@ -114,7 +114,15 @@ def preprocess_events_for_cnn(events):
     pass
 
 def preprocess_events_for_snn(events):
-    """Convert events to format suitable for SNN inference - OPTIMIZED VERSION"""
+    """Convert events to format suitable for SNN inference.
+    
+    Uses the same preprocessing as training:
+    - Spatial downsampling: 640x480 -> 64x48
+    - Feature method: histogram with 10 time bins
+    - Output shape: (30720,) = 64 * 48 * 10
+    """
+    from models.preprocessing import subsample_spatial
+    
     # Handle empty / None input
     if events is None or len(events) == 0:
         return None
@@ -125,45 +133,41 @@ def preprocess_events_for_snn(events):
     if structured.size == 0:
         return None
 
-    # Use camera resolution
-    width, height = _event_resolution_wh()
-
-    # Use time_surface feature extraction
-    features = events_to_features(
+    # Get camera resolution
+    orig_width, orig_height = _event_resolution_wh()
+    
+    # Match training preprocessing parameters
+    TARGET_WIDTH = 64
+    TARGET_HEIGHT = 48
+    N_BINS = 10
+    FEATURE_METHOD = "histogram"
+    
+    # Spatial downsampling (same as training)
+    downsampled = subsample_spatial(
         structured,
-        method="time_surface",
-        width=width,
-        height=height,
+        target_width=TARGET_WIDTH,
+        target_height=TARGET_HEIGHT,
+        orig_width=orig_width,
+        orig_height=orig_height,
     )
-
+    
+    # Extract features using histogram method (same as training)
+    features = events_to_features(
+        downsampled,
+        method=FEATURE_METHOD,
+        width=TARGET_WIDTH,
+        height=TARGET_HEIGHT,
+        n_bins=N_BINS,
+    )
+    
     features = features.astype(np.float32, copy=False)
-
-    # Adapt feature length to match trained model if needed
-    expected_len = getattr(snn_model, "n_features", None)
-    if expected_len is not None and features.size != expected_len:
-        half = features.size // 2
-        pos = features[:half].reshape((height, width))
-        neg = features[half:].reshape((height, width))
-
-        # Compute target dimensions from expected_len (assume 2 channels)
-        area = expected_len // 2
-
-        # Prefer common sensors if exact match
-        target_w, target_h = None, None
-        if area == 640 * 480:
-            target_w, target_h = 640, 480
-        elif area == 346 * 260:
-            target_w, target_h = 346, 260
-        else:
-            # Find factor pair close to current aspect ratio
-            aspect = width / height if height > 0 else 1.0
-            target_h = int(np.sqrt(area / max(aspect, 1e-6)))
-            target_w = area // target_h if target_h > 0 else width
-
-        # Resize using INTER_NEAREST for speed
-        pos_resized = cv.resize(pos, (int(target_w), int(target_h)), interpolation=cv.INTER_NEAREST)
-        neg_resized = cv.resize(neg, (int(target_w), int(target_h)), interpolation=cv.INTER_NEAREST)
-        features = np.concatenate([pos_resized.flatten(), neg_resized.flatten()], dtype=np.float32)
+    
+    # Normalize features (z-score normalization as in training)
+    # For live inference, we use a simple normalization
+    mean = features.mean()
+    std = features.std()
+    if std > 0:
+        features = (features - mean) / std
 
     return features
 

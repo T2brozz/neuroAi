@@ -2,7 +2,7 @@ import nengo_dl
 import nengo
 import numpy as np
 from pathlib import Path
-from models.snn.factory import build_snn
+from models.snn.factory import build_simple_snn
 from typing import NamedTuple
 
 
@@ -32,17 +32,17 @@ def load_snn_model(params_path: Path, hparams_path: Path) -> SNNModel:
                 hparams[key] = value
     
     best_hidden = int(hparams.get('N_NEURONS_HIDDEN'))
-    best_syn_fast = float(hparams.get('SYNAPSE_FAST'))
-    best_syn_slow = float(hparams.get('SYNAPSE_SLOW'))
     n_features = int(hparams.get('N_FEATURES'))
     n_classes = int(hparams.get('N_CLASSES'))
+    best_homogeneous = bool(int(hparams.get('HOMOGENEOUS')))
+    best_spiking = bool(int(hparams.get('SPIKING', 0)))
 
-    net, inp, p_out = build_snn(
+    net, inp, p_out = build_simple_snn(
         n_features=n_features,
         n_classes=n_classes,
         n_neurons_hidden=best_hidden,
-        synapse_fast=best_syn_fast,
-        synapse_slow=best_syn_slow,
+        spiking=best_spiking,
+        homogeneous=best_homogeneous   
     )
     
     print(f"Loading SNN model parameters from {params_path}...")
