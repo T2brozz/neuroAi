@@ -20,7 +20,7 @@ nengo-dl = "3.6.0"
 tqdm = "*"
 scipy = "*"
 scikit-learn = "*"
-ray = {extras = ["tune"], version = "*"}
+ray = {extras = ["tune", "default"], version = "*"}
 keras = "*"
 tensorflow = {extras = ["and-cuda"], version = "*"}
 seaborn = "*"

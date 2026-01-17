@@ -68,7 +68,7 @@ def _ray_trainable(config: Dict[str, Any], X_train: np.ndarray, y_train: np.ndar
         weight_decay=weight_decay,
         use_early_stopping=True,
         early_stopping_min_delta=0.001,
-        early_stopping_patience=10,
+        early_stopping_patience=50,
     )
     
     # Evaluate on validation set using evaluate_model function
@@ -123,8 +123,7 @@ def tune_hyperparameters(
     
     ray.init(
         ignore_reinit_error=True,
-        include_dashboard=False,
-        num_cpus=4,
+        include_dashboard=True,
         log_to_driver=True,
         runtime_env=runtime_env,
     )
@@ -165,8 +164,8 @@ def tune_hyperparameters(
         metric="val_accuracy",
         mode="max",
         name=project_name,
-        resources_per_trial={"cpu": 4},
-        max_concurrent_trials=1,  # Run trials sequentially to avoid resource conflicts
+        max_concurrent_trials=3,
+        progress_reporter=None
     )
 
     best_config = analysis.get_best_config(metric="val_accuracy", mode="max")
