@@ -1,3 +1,6 @@
+import logging
+import os
+
 import numpy as np
 import tensorflow as tf
 import nengo_dl
@@ -19,6 +22,7 @@ def train_model(
     use_early_stopping: bool = True,
     early_stopping_patience: int = 3,
     early_stopping_min_delta: float = 0.0,
+    quiet: bool = False,
 ) -> tuple[tf.keras.callbacks.History, nengo_dl.Simulator]:
     """
     Train a spiking neural network.
@@ -43,6 +47,11 @@ def train_model(
     Returns:
         Tuple of (training history, simulator)
     """
+
+    if quiet:
+        logging.getLogger("nengo").setLevel(logging.WARNING)
+        logging.getLogger("nengo_dl").setLevel(logging.WARNING)
+
     # Configure nengo_dl settings for efficient training
     with net:
         nengo_dl.configure_settings(stateful=False, use_loop=False)
@@ -125,7 +134,7 @@ def train_model(
         {p_out: y_train_reshaped},
         validation_data=val_data,
         callbacks=callbacks if callbacks else None,
-        epochs=epochs
+        epochs=epochs,
     )
 
     print("\nTraining complete!")
