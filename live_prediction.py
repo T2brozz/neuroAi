@@ -8,7 +8,7 @@ import time
 from collections import deque
 
 # TODO: Add your model imports here
-# import tensorflow as tf  # for CNN
+import tensorflow as tf  # for CNN
 from models.snn.predict import load_snn_model, predict_snn  # for SNN
 from models.event_types import dv_store_to_numpy, EVENT_DTYPE
 from models.preprocessing import events_to_features
@@ -43,7 +43,7 @@ noise_filter = dv.noise.BackgroundActivityNoiseFilter(
 )
 
 # TODO: Load your trained models
-# cnn_model = tf.keras.models.load_model('path/to/cnn_model')
+cnn_model = tf.keras.models.load_model('checkpoints/cnn/simple_cnn_large.keras')
 snn_model = load_snn_model(Path('checkpoints/snn/snn_params'), Path('checkpoints/snn/best_hparams.env'))
 
 # Threading setup for async classification
@@ -108,10 +108,59 @@ def compute_event_centroid(events):
     return (centroid_x, centroid_y)
 
 def preprocess_events_for_cnn(events):
-    """Convert events to format suitable for CNN inference"""
-    # TODO: Implement preprocessing based on your CNN input requirements
-    # This might involve creating event frames, histograms, etc.
-    pass
+    """Convert events to format suitable for CNN inference.
+    
+    Creates a 2-channel image (positive/negative events) using time surface method.
+    Output shape: (1, 480, 640, 2) matching the CNN model input.
+    """
+    # Handle empty / None input
+    if events is None or len(events) == 0:
+        return None
+    
+    # Convert dv_processing EventStore to structured numpy
+    structured = dv_store_to_numpy(events)
+    
+    if structured.size == 0:
+        return None
+    
+    # Get camera resolution (full resolution for CNN)
+    width, height = _event_resolution_wh()
+    
+    # Create time surface (2 channels: positive and negative events)
+    # This matches the training preprocessing from cnn.ipynb
+    x_coords = np.clip(structured['x'], 0, width - 1)
+    y_coords = np.clip(structured['y'], 0, height - 1)
+    
+    surface_pos = np.zeros((height, width), dtype=np.float32)
+    surface_neg = np.zeros((height, width), dtype=np.float32)
+    
+    # Time surface: decay based on event recency
+    t_ref = structured['t'][-1]  # Most recent timestamp as reference
+    tau = 1e5  # Time constant in microseconds (100ms)
+    
+    # Vectorized time surface computation for efficiency
+    dt = t_ref - structured['t']
+    decay = np.exp(-dt / tau).astype(np.float32)
+    
+    pos_mask = structured['p'] == 1
+    neg_mask = ~pos_mask
+    
+    # Use maximum decay value at each pixel (most recent event dominates)
+    np.maximum.at(surface_pos, (y_coords[pos_mask], x_coords[pos_mask]), decay[pos_mask])
+    np.maximum.at(surface_neg, (y_coords[neg_mask], x_coords[neg_mask]), decay[neg_mask])
+    
+    # Stack into 2-channel image: (H, W, 2)
+    image = np.stack([surface_pos, surface_neg], axis=-1)
+    
+    # Normalize to [0, 1] range
+    img_max = image.max()
+    if img_max > 0:
+        image = image / img_max
+    
+    # Add batch dimension: (1, H, W, 2)
+    image = np.expand_dims(image, axis=0)
+    
+    return image
 
 def preprocess_events_for_snn(events):
     """Convert events to format suitable for SNN inference.
@@ -188,12 +237,24 @@ def classification_worker():
             snn_result = "SNN: None"
             
             if len(events) > 0:
+                # CNN inference
+                cnn_input = preprocess_events_for_cnn(events)
+                if cnn_input is not None:
+                    cnn_prediction = cnn_model.predict(cnn_input, verbose=0)[0]
+                    cnn_result = f"CNN: {_parse_prediction(cnn_prediction)}"
+                    
+                    # Log CNN classification
+                    if ":" in cnn_result:
+                        model, label = cnn_result.split(":", 1)
+                        _log_classification(model.strip(), label.strip())
+                
+                # SNN inference
                 snn_input = preprocess_events_for_snn(events)
                 if snn_input is not None:
                     snn_prediction = predict_snn(snn_model, features=snn_input)
                     snn_result = f"SNN: {_parse_prediction(snn_prediction)}"
                     
-                    # Log classification
+                    # Log SNN classification
                     if ":" in snn_result:
                         model, label = snn_result.split(":", 1)
                         _log_classification(model.strip(), label.strip())

@@ -69,6 +69,7 @@ def _ray_trainable(config: Dict[str, Any], X_train: np.ndarray, y_train: np.ndar
         use_early_stopping=True,
         early_stopping_min_delta=0.001,
         early_stopping_patience=50,
+        quiet=True,
     )
     
     # Evaluate on validation set using evaluate_model function
@@ -126,6 +127,7 @@ def tune_hyperparameters(
         include_dashboard=True,
         log_to_driver=True,
         runtime_env=runtime_env,
+        num_cpus=3,
     )
 
     print("[Ray Tune] Preparing hyperparameter search...")
@@ -164,7 +166,7 @@ def tune_hyperparameters(
         metric="val_accuracy",
         mode="max",
         name=project_name,
-        max_concurrent_trials=3,
+        resources_per_trial={"cpu": 3, "gpu": 0},
         progress_reporter=None
     )
 
