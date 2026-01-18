@@ -42,7 +42,7 @@ noise_filter = dv.noise.BackgroundActivityNoiseFilter(
     backgroundActivityDuration=timedelta(milliseconds=2)  # 2ms background activity duration
 )
 
-# TODO: Load your trained models
+# Load your trained models
 cnn_model = tf.keras.models.load_model('checkpoints/cnn/simple_cnn_large.keras')
 snn_model = load_snn_model(Path('checkpoints/snn/snn_params'), Path('checkpoints/snn/best_hparams.env'))
 
@@ -110,7 +110,11 @@ def compute_event_centroid(events):
 def preprocess_events_for_cnn(events):
     """Convert events to format suitable for CNN inference.
     
-    Creates a 2-channel image (positive/negative events) using time surface method.
+    Uses the same preprocessing as training (from preprocess_data.py):
+    - feature_method: 'time_surface'
+    - spatial_downsample: False (full 640x480 resolution)
+    - tau = 1e5 (100ms time constant)
+    
     Output shape: (1, 480, 640, 2) matching the CNN model input.
     """
     # Handle empty / None input
@@ -123,39 +127,43 @@ def preprocess_events_for_cnn(events):
     if structured.size == 0:
         return None
     
-    # Get camera resolution (full resolution for CNN)
+    # Get camera resolution (full resolution - no spatial downsampling)
     width, height = _event_resolution_wh()
     
     # Create time surface (2 channels: positive and negative events)
-    # This matches the training preprocessing from cnn.ipynb
-    x_coords = np.clip(structured['x'], 0, width - 1)
-    y_coords = np.clip(structured['y'], 0, height - 1)
+    # This matches models/preprocessing.py events_to_features with method='time_surface'
+    x_coords = np.clip(structured['x'], 0, width - 1).astype(np.int32)
+    y_coords = np.clip(structured['y'], 0, height - 1).astype(np.int32)
     
     surface_pos = np.zeros((height, width), dtype=np.float32)
     surface_neg = np.zeros((height, width), dtype=np.float32)
     
-    # Time surface: decay based on event recency
+    # Time surface: exponential decay based on event recency
     t_ref = structured['t'][-1]  # Most recent timestamp as reference
-    tau = 1e5  # Time constant in microseconds (100ms)
+    tau = 1e5  # Time constant in microseconds (100ms) - matches training
     
-    # Vectorized time surface computation for efficiency
+    # Compute decay values
     dt = t_ref - structured['t']
     decay = np.exp(-dt / tau).astype(np.float32)
     
+    # Separate by polarity
     pos_mask = structured['p'] == 1
     neg_mask = ~pos_mask
     
     # Use maximum decay value at each pixel (most recent event dominates)
+    # This matches the training loop: surface[y, x] = max(surface[y, x], val)
     np.maximum.at(surface_pos, (y_coords[pos_mask], x_coords[pos_mask]), decay[pos_mask])
     np.maximum.at(surface_neg, (y_coords[neg_mask], x_coords[neg_mask]), decay[neg_mask])
     
-    # Stack into 2-channel image: (H, W, 2)
+    # Stack into 2-channel image: (H, W, 2) 
+    # Training stores as concat([pos.flatten(), neg.flatten()]), then reshapes to (H, W, 2)
     image = np.stack([surface_pos, surface_neg], axis=-1)
     
-    # Normalize to [0, 1] range
-    img_max = image.max()
-    if img_max > 0:
-        image = image / img_max
+    # Z-score normalization (same as training with normalize_features)
+    mean = image.mean()
+    std = image.std()
+    if std > 0:
+        image = (image - mean) / std
     
     # Add batch dimension: (1, H, W, 2)
     image = np.expand_dims(image, axis=0)
