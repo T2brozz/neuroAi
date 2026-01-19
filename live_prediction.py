@@ -15,7 +15,9 @@ from models.preprocessing import events_to_features
 
 from pathlib import Path
 
-label_names = ['mark', 'marvin', 'yannes']
+# Labels matching the preprocessing config
+# Order: keep_labels + 'unknown' + 'stale'
+label_names = ['mark', 'marvin', 'yannes', 'unknown', 'stale']
 
 # Log file path for non-uncertain classifications
 LOG_PATH = Path(f'logs/{datetime.now().strftime("live_predictions_%Y%m%d_%H%M%S.log")}')
