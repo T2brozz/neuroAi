@@ -60,7 +60,7 @@ def predict_snn(model: SNNModel, features: np.ndarray) -> np.ndarray:
         sim: nengo_dl Simulator with loaded SNN model.
         features: Input features for prediction.
     Returns:
-        Predicted class probabilities.
+        Predicted class probabilities (softmax applied).
     """
     if features is None:
         return None
@@ -78,11 +78,17 @@ def predict_snn(model: SNNModel, features: np.ndarray) -> np.ndarray:
     # Run simulation
     output = model.sim.predict({model.inp: input_data})
     
-    # Extract output probabilities
-    probs_time = output[model.p_out][0]
-    if probs_time.ndim == 2:
-        probabilities = probs_time[-1]
+    # Extract output logits
+    logits_time = output[model.p_out][0]
+    if logits_time.ndim == 2:
+        logits = logits_time[-1]
     else:
-        probabilities = probs_time
+        logits = logits_time
+    
+    # Apply softmax to convert logits to probabilities
+    # Subtract max for numerical stability
+    logits = logits - np.max(logits)
+    exp_logits = np.exp(logits)
+    probabilities = exp_logits / np.sum(exp_logits)
     
     return probabilities

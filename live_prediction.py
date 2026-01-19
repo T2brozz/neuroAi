@@ -114,11 +114,15 @@ def preprocess_events_for_cnn(events):
     
     Uses the same preprocessing as training (from preprocess_data.py):
     - feature_method: 'time_surface'
-    - spatial_downsample: False (full 640x480 resolution)
+    - Resize to model expected size (480x640)
     - tau = 1e5 (100ms time constant)
     
     Output shape: (1, 480, 640, 2) matching the CNN model input.
     """
+    # Model expected dimensions
+    MODEL_HEIGHT = 480
+    MODEL_WIDTH = 640
+    
     # Handle empty / None input
     if events is None or len(events) == 0:
         return None
@@ -129,11 +133,10 @@ def preprocess_events_for_cnn(events):
     if structured.size == 0:
         return None
     
-    # Get camera resolution (full resolution - no spatial downsampling)
+    # Get actual camera resolution
     width, height = _event_resolution_wh()
     
-    # Create time surface (2 channels: positive and negative events)
-    # This matches models/preprocessing.py events_to_features with method='time_surface'
+    # Create time surface at camera resolution (2 channels: positive and negative events)
     x_coords = np.clip(structured['x'], 0, width - 1).astype(np.int32)
     y_coords = np.clip(structured['y'], 0, height - 1).astype(np.int32)
     
@@ -153,13 +156,15 @@ def preprocess_events_for_cnn(events):
     neg_mask = ~pos_mask
     
     # Use maximum decay value at each pixel (most recent event dominates)
-    # This matches the training loop: surface[y, x] = max(surface[y, x], val)
     np.maximum.at(surface_pos, (y_coords[pos_mask], x_coords[pos_mask]), decay[pos_mask])
     np.maximum.at(surface_neg, (y_coords[neg_mask], x_coords[neg_mask]), decay[neg_mask])
     
     # Stack into 2-channel image: (H, W, 2) 
-    # Training stores as concat([pos.flatten(), neg.flatten()]), then reshapes to (H, W, 2)
     image = np.stack([surface_pos, surface_neg], axis=-1)
+    
+    # Resize to model expected dimensions if needed
+    if height != MODEL_HEIGHT or width != MODEL_WIDTH:
+        image = cv.resize(image, (MODEL_WIDTH, MODEL_HEIGHT), interpolation=cv.INTER_LINEAR)
     
     # Z-score normalization (same as training with normalize_features)
     mean = image.mean()
@@ -250,8 +255,9 @@ def classification_worker():
                 # CNN inference
                 cnn_input = preprocess_events_for_cnn(events)
                 if cnn_input is not None:
-                    cnn_prediction = cnn_model.predict(cnn_input, verbose=0)[0]
-                    cnn_result = f"CNN: {_parse_prediction(cnn_prediction)}"
+                    cnn_prediction = cnn_model.predict(cnn_input, verbose=0)
+                    print(f"CNN Classification Probabilities: {cnn_prediction[0]}")
+                    cnn_result = f"CNN: {_parse_prediction(cnn_prediction[0])}"
                     
                     # Log CNN classification
                     if ":" in cnn_result:
@@ -262,6 +268,7 @@ def classification_worker():
                 snn_input = preprocess_events_for_snn(events)
                 if snn_input is not None:
                     snn_prediction = predict_snn(snn_model, features=snn_input)
+                    print(f"SNN Classification Probabilities: {snn_prediction}")    
                     snn_result = f"SNN: {_parse_prediction(snn_prediction)}"
                     
                     # Log SNN classification
