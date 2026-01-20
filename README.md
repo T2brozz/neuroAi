@@ -42,7 +42,7 @@ The `preprocess_data.py` script performs the following preprocessing steps:
 
 2. **Label Remapping**: Maps the person identities to a final class set. Keeps the specified labels, maps all others to 'unknown', and preserves the 'stale' label for low-activity windows.
 
-3. **Class Balancing**: Balances the 'stale' class by randomly downsampling it to match the average count of non-stale classes, ensuring the dataset is not dominated by low-activity samples.
+3. **Class Balancing**: Windows with event activity below the threshold (`activity_min_events`) are labeled as 'stale'. The 'stale' class is then balanced by randomly downsampling it to match the average count of non-stale classes, ensuring the dataset is not dominated by low-activity samples.
 
 4. **Feature Normalization**: Applies z-score normalization to each feature dimension across the entire dataset to ensure consistent scaling.
 
