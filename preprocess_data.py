@@ -11,10 +11,8 @@ from pathlib import Path
 from models.preprocessing import (
     load_dataset,
     normalize_features,
-    split_dataset,
     one_hot_encode,
     save_preprocessed,
-    split_events_into_windows,
 )
 
 
@@ -102,34 +100,108 @@ def main():
     for idx, name in enumerate(class_names):
         count = np.sum(y_array == idx)
         print(f"    {idx}: {name} ({count} samples)")
-    del y_array
+    
+    # Balance stale class to match average of other classes
+    # We only compute INDICES to keep, not copying actual data
+    print("\nStep 1.6: Balancing stale class...")
+    stale_idx = class_names.index(stale_label)
+    non_stale_counts = [np.sum(y_array == idx) for idx, name in enumerate(class_names) if name != stale_label]
+    avg_non_stale = int(np.mean(non_stale_counts))
+    stale_count = np.sum(y_array == stale_idx)
+    
+    print(f"  Non-stale class counts: {non_stale_counts}")
+    print(f"  Average non-stale count: {avg_non_stale}")
+    print(f"  Current stale count: {stale_count}")
+    
+    if stale_count > avg_non_stale:
+        # Find indices of stale samples and randomly select subset
+        all_indices = np.arange(len(y_array))
+        stale_mask = y_array == stale_idx
+        non_stale_mask = ~stale_mask
+        
+        stale_indices = all_indices[stale_mask]
+        non_stale_indices = all_indices[non_stale_mask]
+        
+        # Randomly select stale samples to keep
+        rng_balance = np.random.RandomState(config['random_seed'])
+        keep_stale_indices = rng_balance.choice(stale_indices, size=avg_non_stale, replace=False)
+        
+        # Combine and sort to maintain order - these are INDICES into the original arrays
+        balanced_indices = np.sort(np.concatenate([non_stale_indices, keep_stale_indices]))
+        
+        print(f"  Reducing stale class from {stale_count} to {avg_non_stale} samples")
+        print(f"  Total samples: {len(y_array)} -> {len(balanced_indices)}")
+    else:
+        print(f"  Stale class already balanced (≤ average), no changes needed")
+        balanced_indices = np.arange(len(y_array))
+    
+    # Report final class distribution using the balanced indices
+    y_balanced = y_array[balanced_indices]
+    print(f"\n  Final balanced class distribution:")
+    for idx, name in enumerate(class_names):
+        count = np.sum(y_balanced == idx)
+        print(f"    {idx}: {name} ({count} samples)")
+    
+    del y_array, y_balanced
     gc.collect()
     
-    # Normalize (in-place for memmap)
+    # Normalize in chunks (keeps data in memmap)
     print("\nStep 2: Normalizing features...")
     X = normalize_features(X)
     
-    # Shuffle indices (not the data itself)
+    # Shuffle the balanced indices (not the data itself)
     print("\nStep 3: Creating shuffled indices...")
-    n_samples = len(y)
+    n_samples = len(balanced_indices)
     rng = np.random.RandomState(config['random_seed'])
-    shuffle_idx = rng.permutation(n_samples)
+    shuffle_perm = rng.permutation(n_samples)
+    # Apply shuffle to balanced indices
+    final_indices = balanced_indices[shuffle_perm]
     print(f"  Created shuffle permutation with seed: {config['random_seed']}")
+    print(f"  Final dataset size: {n_samples} samples")
     
-    # Split dataset (returns indices, not data copies)
+    # Split using indices into the final_indices array
     print("\nStep 4: Splitting dataset...")
-    splits, data = split_dataset(
-        X, y,
-        val_split=config['val_split'],
-        test_split=config['test_split'],
+    from sklearn.model_selection import train_test_split
+    
+    # Get labels for stratification
+    y_for_split = np.array(y)[final_indices]
+    split_indices = np.arange(len(final_indices))
+    
+    # Check stratification
+    unique, counts = np.unique(y_for_split, return_counts=True)
+    can_stratify = counts.min() >= 2
+    stratify_arg = y_for_split if can_stratify else None
+    
+    # First split: train+val vs test
+    trainval_idx, test_idx = train_test_split(
+        split_indices,
+        test_size=config['test_split'],
         random_state=config['random_seed'],
+        stratify=stratify_arg
     )
     
-    # Apply shuffle to split indices
-    for split_name in splits:
-        indices, _ = splits[split_name]
-        # Map through shuffle permutation
-        splits[split_name] = (shuffle_idx[indices], None)
+    # Second split: train vs val
+    val_size_adj = config['val_split'] / (1 - config['test_split'])
+    if can_stratify:
+        y_trainval = y_for_split[trainval_idx]
+        stratify_trainval = y_trainval if np.unique(y_trainval, return_counts=True)[1].min() >= 2 else None
+    else:
+        stratify_trainval = None
+    
+    train_idx, val_idx = train_test_split(
+        trainval_idx,
+        test_size=val_size_adj,
+        random_state=config['random_seed'],
+        stratify=stratify_trainval
+    )
+    
+    # Map split indices back to original data indices
+    splits = {
+        'train': (final_indices[train_idx], None),
+        'val': (final_indices[val_idx], None),
+        'test': (final_indices[test_idx], None),
+    }
+    data = (X, y)
     
     # Report split sizes
     n_classes = len(class_names)
