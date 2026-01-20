@@ -23,9 +23,8 @@ def main():
     
     # Configuration
     config = {
-        'feature_method': 'time_surface',  # 'histogram', 'rate', or 'time_surface'
+        'feature_method': 'time_surface',   # 'histogram', 'rate', or 'time_surface'
         'n_bins': 10,                       # Only used for histogram/rate features
-        'filter_activity': False,           # Disabled - low activity goes to 'stale' label
         'activity_window_ms': 1000,         # Window size for activity check
         'activity_min_events': 75000,       # Threshold: below this → 'stale' label
         'event_window_ms': 1000,            # Split recordings into 1s windows
@@ -62,7 +61,7 @@ def main():
     )
     
     # Remap labels: keep_labels stay, others become 'other_label'
-    print("\nStep 1.5: Remapping labels...")
+    print("\nStep 2: Remapping labels...")
     keep_labels = config['keep_labels']
     stale_label = config['stale_label']
     other_label = config['other_label']
@@ -103,7 +102,7 @@ def main():
     
     # Balance stale class to match average of other classes
     # We only compute INDICES to keep, not copying actual data
-    print("\nStep 1.6: Balancing stale class...")
+    print("\nStep 3: Balancing stale class...")
     stale_idx = class_names.index(stale_label)
     non_stale_counts = [np.sum(y_array == idx) for idx, name in enumerate(class_names) if name != stale_label]
     avg_non_stale = int(np.mean(non_stale_counts))
@@ -146,11 +145,11 @@ def main():
     gc.collect()
     
     # Normalize in chunks (keeps data in memmap)
-    print("\nStep 2: Normalizing features...")
+    print("\nStep 4: Normalizing features...")
     X = normalize_features(X)
     
     # Shuffle the balanced indices (not the data itself)
-    print("\nStep 3: Creating shuffled indices...")
+    print("\nStep 5: Creating shuffled indices...")
     n_samples = len(balanced_indices)
     rng = np.random.RandomState(config['random_seed'])
     shuffle_perm = rng.permutation(n_samples)
@@ -160,7 +159,7 @@ def main():
     print(f"  Final dataset size: {n_samples} samples")
     
     # Split using indices into the final_indices array
-    print("\nStep 4: Splitting dataset...")
+    print("\nStep 6: Splitting dataset...")
     from sklearn.model_selection import train_test_split
     
     # Get labels for stratification
@@ -209,11 +208,11 @@ def main():
         print(f"  {split_name}: {len(indices)} samples")
     
     # Save (handles one-hot encoding internally)
-    print("\nStep 5: Saving preprocessed data...")
+    print("\nStep 7: Saving preprocessed data...")
     save_preprocessed(splits, data, save_dir, class_names)
     
     # Clean up temp files
-    print("\nStep 6: Cleaning up temporary files...")
+    print("\nStep 8: Cleaning up temporary files...")
     temp_dir = save_dir / 'temp'
     if temp_dir.exists():
         for f in temp_dir.glob('*.mmap'):

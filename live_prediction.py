@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+Live prediction from DAVIS event camera.
+Runs CNN and SNN models on real-time event stream for person classification.
+"""
 from datetime import timedelta, datetime
 import numpy as np
 import cv2 as cv
@@ -7,7 +12,6 @@ import queue
 import time
 from collections import deque
 
-# TODO: Add your model imports here
 import tensorflow as tf  # for CNN
 from models.snn.predict import load_snn_model, predict_snn  # for SNN
 from models.event_types import dv_store_to_numpy, EVENT_DTYPE
@@ -19,45 +23,8 @@ from pathlib import Path
 # Order: keep_labels + 'unknown' + 'stale'
 label_names = ['mark', 'marvin', 'yannes', 'unknown', 'stale']
 
-# Log file path for non-uncertain classifications
-LOG_PATH = Path(f'logs/{datetime.now().strftime("live_predictions_%Y%m%d_%H%M%S.log")}')
-LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# Open the camera, just use first detected DAVIS camera
-camera = dv.io.camera.DAVIS()
-
-# Initialize a single-stream slicer for events only
-slicer = dv.EventStreamSlicer()
-
-# Initialize a visualizer for events
-visualizer = dv.visualization.EventVisualizer(camera.getEventResolution(), 
-                                              dv.visualization.colors.black(),
-                                              dv.visualization.colors.white(), 
-                                              dv.visualization.colors.white())
-
-# Create a window for image display
-cv.namedWindow("Event Stream - Person Classification", cv.WINDOW_NORMAL)
-
-# Initialize noise filter with parameters in constructor
-noise_filter = dv.noise.BackgroundActivityNoiseFilter(
-    camera.getEventResolution(), 
-    backgroundActivityDuration=timedelta(milliseconds=2)  # 2ms background activity duration
-)
-
-# Load your trained models
-cnn_model = tf.keras.models.load_model('checkpoints/cnn/simple_cnn_large.keras')
-snn_model = load_snn_model(Path('checkpoints/snn/snn_params'), Path('checkpoints/snn/best_hparams.env'))
-
-# Threading setup for async classification
-classification_queue = queue.Queue(maxsize=1)  # Only keep latest events
-result_lock = threading.Lock()
-current_classification = {"cnn": "CNN: None", "snn": "SNN: None", "timestamp": time.time()}
-classification_running = threading.Event()
-classification_running.set()
-fps_history = deque(maxlen=30)
-last_fps_time = time.time()
-
-def _log_classification(model: str, label: str) -> None:
+def _log_classification(log_path: Path, model: str, label: str) -> None:
     """Append a classification to the log file for any model.
 
     Only logs when label is not "Uncertain" or "None".
@@ -67,7 +34,7 @@ def _log_classification(model: str, label: str) -> None:
         if not model or not label or label in ("Uncertain", "None"):
             return
         timestamp = datetime.now().isoformat()
-        with LOG_PATH.open("a", encoding="utf-8") as f:
+        with log_path.open("a", encoding="utf-8") as f:
             f.write(f"{timestamp}\t{model}\t{label}\n")
     except Exception:
         # Silently ignore logging errors to avoid interrupting the stream
@@ -87,7 +54,7 @@ def _parse_prediction(prediction: np.ndarray, confidence_threshold: float = 0.5)
     
     return label_names[idx]
 
-def _event_resolution_wh():
+def _event_resolution_wh(camera):
     """Return (width, height) for event resolution across dv_processing variants."""
     res = camera.getEventResolution()
     # Some versions return an object with width/height, others return a tuple
@@ -109,7 +76,7 @@ def compute_event_centroid(events):
     
     return (centroid_x, centroid_y)
 
-def preprocess_events_for_cnn(events):
+def preprocess_events_for_cnn(events, camera):
     """Convert events to format suitable for CNN inference.
     
     Uses the same preprocessing as training (from preprocess_data.py):
@@ -134,7 +101,7 @@ def preprocess_events_for_cnn(events):
         return None
     
     # Get actual camera resolution
-    width, height = _event_resolution_wh()
+    width, height = _event_resolution_wh(camera)
     
     # Create time surface at camera resolution (2 channels: positive and negative events)
     x_coords = np.clip(structured['x'], 0, width - 1).astype(np.int32)
@@ -177,7 +144,7 @@ def preprocess_events_for_cnn(events):
     
     return image
 
-def preprocess_events_for_snn(events):
+def preprocess_events_for_snn(events, camera):
     """Convert events to format suitable for SNN inference.
     
     Uses the same preprocessing as training:
@@ -198,7 +165,7 @@ def preprocess_events_for_snn(events):
         return None
 
     # Get camera resolution
-    orig_width, orig_height = _event_resolution_wh()
+    orig_width, orig_height = _event_resolution_wh(camera)
     
     # Match training preprocessing parameters
     TARGET_WIDTH = 64
@@ -235,166 +202,210 @@ def preprocess_events_for_snn(events):
 
     return features
 
-def classification_worker():
-    """Background thread that processes classification requests"""
-    print("Classification worker thread started")
-    
-    while classification_running.is_set():
-        try:
-            # Get events from queue with timeout
-            events = classification_queue.get(timeout=0.1)
-            
-            if events is None:
-                continue
-            
-            # Perform classification
-            cnn_result = "CNN: None"
-            snn_result = "SNN: None"
-            
-            if len(events) > 0:
-                # CNN inference
-                cnn_input = preprocess_events_for_cnn(events)
-                if cnn_input is not None:
-                    cnn_prediction = cnn_model.predict(cnn_input, verbose=0)
-                    print(f"CNN Classification Probabilities: {cnn_prediction[0]}")
-                    cnn_result = f"CNN: {_parse_prediction(cnn_prediction[0])}"
-                    
-                    # Log CNN classification
-                    if ":" in cnn_result:
-                        model, label = cnn_result.split(":", 1)
-                        _log_classification(model.strip(), label.strip())
+
+def main():
+    """Main entry point for live prediction."""
+    # Log file path for non-uncertain classifications
+    log_path = Path(f'logs/{datetime.now().strftime("live_predictions_%Y%m%d_%H%M%S.log")}')
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Open the camera, just use first detected DAVIS camera
+    camera = dv.io.camera.DAVIS()
+
+    # Initialize a single-stream slicer for events only
+    slicer = dv.EventStreamSlicer()
+
+    # Initialize a visualizer for events
+    visualizer = dv.visualization.EventVisualizer(
+        camera.getEventResolution(), 
+        dv.visualization.colors.black(),
+        dv.visualization.colors.white(), 
+        dv.visualization.colors.white()
+    )
+
+    # Create a window for image display
+    cv.namedWindow("Event Stream - Person Classification", cv.WINDOW_NORMAL)
+
+    # Initialize noise filter with parameters in constructor
+    noise_filter = dv.noise.BackgroundActivityNoiseFilter(
+        camera.getEventResolution(), 
+        backgroundActivityDuration=timedelta(milliseconds=2)  # 2ms background activity duration
+    )
+
+    # Load your trained models
+    cnn_model = tf.keras.models.load_model('checkpoints/cnn/simple_cnn_large.keras')
+    snn_model = load_snn_model(Path('checkpoints/snn/snn_params'), Path('checkpoints/snn/best_hparams.env'))
+
+    # Threading setup for async classification
+    classification_queue = queue.Queue(maxsize=1)  # Only keep latest events
+    result_lock = threading.Lock()
+    current_classification = {"cnn": "CNN: None", "snn": "SNN: None", "timestamp": time.time()}
+    classification_running = threading.Event()
+    classification_running.set()
+    fps_history = deque(maxlen=30)
+    last_fps_time = [time.time()]  # Use list for mutable closure
+
+    def classification_worker():
+        """Background thread that processes classification requests"""
+        print("Classification worker thread started")
+        
+        while classification_running.is_set():
+            try:
+                # Get events from queue with timeout
+                events = classification_queue.get(timeout=0.1)
                 
-                # SNN inference
-                snn_input = preprocess_events_for_snn(events)
-                if snn_input is not None:
-                    snn_prediction = predict_snn(snn_model, features=snn_input)
-                    print(f"SNN Classification Probabilities: {snn_prediction}")    
-                    snn_result = f"SNN: {_parse_prediction(snn_prediction)}"
+                if events is None:
+                    continue
+                
+                # Perform classification
+                cnn_result = "CNN: None"
+                snn_result = "SNN: None"
+                
+                if len(events) > 0:
+                    # CNN inference
+                    cnn_input = preprocess_events_for_cnn(events, camera)
+                    if cnn_input is not None:
+                        cnn_prediction = cnn_model.predict(cnn_input, verbose=0)
+                        print(f"CNN Classification Probabilities: {cnn_prediction[0]}")
+                        cnn_result = f"CNN: {_parse_prediction(cnn_prediction[0])}"
+                        
+                        # Log CNN classification
+                        if ":" in cnn_result:
+                            model, label = cnn_result.split(":", 1)
+                            _log_classification(log_path, model.strip(), label.strip())
                     
-                    # Log SNN classification
-                    if ":" in snn_result:
-                        model, label = snn_result.split(":", 1)
-                        _log_classification(model.strip(), label.strip())
-            
-            # Update shared results
-            with result_lock:
-                current_classification["cnn"] = cnn_result
-                current_classification["snn"] = snn_result
-                current_classification["timestamp"] = time.time()
-            
-            classification_queue.task_done()
-            
-        except queue.Empty:
-            continue
-        except Exception as e:
-            print(f"Classification error: {e}")
-            continue
-    
-    print("Classification worker thread stopped")
+                    # SNN inference
+                    snn_input = preprocess_events_for_snn(events, camera)
+                    if snn_input is not None:
+                        snn_prediction = predict_snn(snn_model, features=snn_input)
+                        print(f"SNN Classification Probabilities: {snn_prediction}")    
+                        snn_result = f"SNN: {_parse_prediction(snn_prediction)}"
+                        
+                        # Log SNN classification
+                        if ":" in snn_result:
+                            model, label = snn_result.split(":", 1)
+                            _log_classification(log_path, model.strip(), label.strip())
+                
+                # Update shared results
+                with result_lock:
+                    current_classification["cnn"] = cnn_result
+                    current_classification["snn"] = snn_result
+                    current_classification["timestamp"] = time.time()
+                
+                classification_queue.task_done()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Classification error: {e}")
+                continue
+        
+        print("Classification worker thread stopped")
 
-# Callback method for time based slicing
-def process_events(events):
-    """OPTIMIZED event processing with async classification"""
-    global last_fps_time
-    
-    # FPS tracking
-    current_time = time.time()
-    frame_time = current_time - last_fps_time
-    if frame_time > 0:
-        fps_history.append(1.0 / frame_time)
-    last_fps_time = current_time
-    avg_fps = np.mean(fps_history) if len(fps_history) > 0 else 0
-    
-    original_count = len(events)
-    
-    # Apply noise filter (fast operation)
-    noise_filter.accept(events)
-    filtered_events = noise_filter.generateEvents()
-    filtered_count = len(filtered_events) if filtered_events is not None else 0
-    
-    # Use filtered events
-    events_to_process = filtered_events if filtered_events is not None and len(filtered_events) > 0 else events
-    
-    # Submit to classification thread (non-blocking)
-    # Only submit if queue is empty (drop frames if classifier is busy)
-    if classification_queue.empty() and len(events_to_process) > 0:
-        try:
-            classification_queue.put_nowait(events_to_process)
-        except queue.Full:
-            pass  # Skip this frame if queue is full
-    
-    # Generate visualization (fast operation)
-    event_image = visualizer.generateImage(events_to_process)
-    
-    # Get current classification results (cached from background thread)
-    with result_lock:
-        cnn_result = current_classification["cnn"]
-        snn_result = current_classification["snn"]
-        classification_age = current_time - current_classification["timestamp"]
-    
-    # Add text overlays (fixed positions for performance)
-    font = cv.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.7
-    thickness = 2
-    
-    # FPS counter (top left)
-    cv.putText(event_image, f"FPS: {avg_fps:.1f}", 
-              (10, 30), font, font_scale, (0, 255, 0), thickness)
-    
-    # Event count (top left, below FPS)
-    cv.putText(event_image, f"Events: {filtered_count}/{original_count}", 
-              (10, 60), font, 0.6, (255, 255, 255), 1)
-    
-    # Classification age indicator (top left, below event count)
-    if classification_age < 1.0:
-        age_color = (0, 255, 0)  # Green = fresh
-    elif classification_age < 2.0:
-        age_color = (0, 255, 255)  # Yellow = slightly old
-    else:
-        age_color = (0, 0, 255)  # Red = stale
-    cv.putText(event_image, f"Class age: {classification_age:.1f}s", 
-              (10, 90), font, 0.5, age_color, 1)
-    
-    # SNN classification (bottom left)
-    cv.putText(event_image, snn_result, 
-              (10, event_image.shape[0] - 30), 
-              font, font_scale, (0, 0, 255), thickness)
-    
-    # CNN classification (bottom left, above SNN)
-    cv.putText(event_image, cnn_result, 
-              (10, event_image.shape[0] - 60), 
-              font, font_scale, (0, 255, 0), thickness)
-    
-    # Display the image
-    cv.imshow("Event Stream - Person Classification", event_image)
-    
-    # Exit on ESC key (non-blocking)
-    if cv.waitKey(1) & 0xFF == 27:
-        classification_running.clear()  # Signal classification thread to stop
+    def process_events(events):
+        """OPTIMIZED event processing with async classification"""
+        # FPS tracking
+        current_time = time.time()
+        frame_time = current_time - last_fps_time[0]
+        if frame_time > 0:
+            fps_history.append(1.0 / frame_time)
+        last_fps_time[0] = current_time
+        avg_fps = np.mean(fps_history) if len(fps_history) > 0 else 0
+        
+        original_count = len(events)
+        
+        # Apply noise filter (fast operation)
+        noise_filter.accept(events)
+        filtered_events = noise_filter.generateEvents()
+        filtered_count = len(filtered_events) if filtered_events is not None else 0
+        
+        # Use filtered events
+        events_to_process = filtered_events if filtered_events is not None and len(filtered_events) > 0 else events
+        
+        # Submit to classification thread (non-blocking)
+        # Only submit if queue is empty (drop frames if classifier is busy)
+        if classification_queue.empty() and len(events_to_process) > 0:
+            try:
+                classification_queue.put_nowait(events_to_process)
+            except queue.Full:
+                pass  # Skip this frame if queue is full
+        
+        # Generate visualization (fast operation)
+        event_image = visualizer.generateImage(events_to_process)
+        
+        # Get current classification results (cached from background thread)
+        with result_lock:
+            cnn_result = current_classification["cnn"]
+            snn_result = current_classification["snn"]
+            classification_age = current_time - current_classification["timestamp"]
+        
+        # Add text overlays (fixed positions for performance)
+        font = cv.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.7
+        thickness = 2
+        
+        # FPS counter (top left)
+        cv.putText(event_image, f"FPS: {avg_fps:.1f}", 
+                  (10, 30), font, font_scale, (0, 255, 0), thickness)
+        
+        # Event count (top left, below FPS)
+        cv.putText(event_image, f"Events: {filtered_count}/{original_count}", 
+                  (10, 60), font, 0.6, (255, 255, 255), 1)
+        
+        # Classification age indicator (top left, below event count)
+        if classification_age < 1.0:
+            age_color = (0, 255, 0)  # Green = fresh
+        elif classification_age < 2.0:
+            age_color = (0, 255, 255)  # Yellow = slightly old
+        else:
+            age_color = (0, 0, 255)  # Red = stale
+        cv.putText(event_image, f"Class age: {classification_age:.1f}s", 
+                  (10, 90), font, 0.5, age_color, 1)
+        
+        # SNN classification (bottom left)
+        cv.putText(event_image, snn_result, 
+                  (10, event_image.shape[0] - 30), 
+                  font, font_scale, (0, 0, 255), thickness)
+        
+        # CNN classification (bottom left, above SNN)
+        cv.putText(event_image, cnn_result, 
+                  (10, event_image.shape[0] - 60), 
+                  font, font_scale, (0, 255, 0), thickness)
+        
+        # Display the image
+        cv.imshow("Event Stream - Person Classification", event_image)
+        
+        # Exit on ESC key (non-blocking)
+        if cv.waitKey(1) & 0xFF == 27:
+            classification_running.clear()  # Signal classification thread to stop
+            cv.destroyAllWindows()
+            exit(0)
+
+    # Start classification worker thread
+    classification_running.set()
+    classification_thread = threading.Thread(target=classification_worker, daemon=True)
+    classification_thread.start()
+    print("Classification worker thread started")
+
+    # Register a job to be performed every 33 milliseconds (30 FPS)
+    slicer.doEveryTimeInterval(timedelta(milliseconds=33), process_events)
+
+    # Continue the loop while camera is connected
+    try:
+        while camera.isRunning():
+            events = camera.getNextEventBatch()
+            if events is not None:
+                slicer.accept(events)
+    except KeyboardInterrupt:
+        print("\nStopping...")
+    finally:
+        # Clean shutdown
+        classification_running.clear()
         cv.destroyAllWindows()
-        exit(0)
+        print("Waiting for classification thread to finish...")
+        classification_thread.join(timeout=2.0)
+        print("Done!")
 
-# Start classification worker thread
-classification_running.set()
-classification_thread = threading.Thread(target=classification_worker, daemon=True)
-classification_thread.start()
-print("Classification worker thread started")
 
-# Register a job to be performed every 33 milliseconds (30 FPS)
-slicer.doEveryTimeInterval(timedelta(milliseconds=33), process_events)
-
-# Continue the loop while camera is connected
-try:
-    while camera.isRunning():
-        events = camera.getNextEventBatch()
-        if events is not None:
-            slicer.accept(events)
-except KeyboardInterrupt:
-    print("\nStopping...")
-finally:
-    # Clean shutdown
-    classification_running.clear()
-    cv.destroyAllWindows()
-    print("Waiting for classification thread to finish...")
-    classification_thread.join(timeout=2.0)
-    print("Done!")
+if __name__ == '__main__':
+    main()
