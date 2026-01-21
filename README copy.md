@@ -124,9 +124,18 @@ The evaluation reveals that the Simple CNN Large architecture significantly outp
 | Basic Transformer ViT | 83.88% | 38.5 ms | 2.44M |
 | LSTM | 69.74% | 54.5 ms | 0.86M |
 
-The superior performance of the straightforward CNN over Vision Transformers and recurrent models can be attributed to several factors specific to this classification task. Gait patterns in time surface representations manifest as localised spatial features, which convolutional networks extract efficiently through hierarchical convolutions. In contrast, Transformers are designed to model long-range global dependencies that prove less relevant for this application. Furthermore, the time surface preprocessing already encodes temporal dynamics into the spatial structure of each frame, eliminating the need for models to learn temporal relationships across sequences. Vision Transformers also require substantially more training data to learn effective attention patterns; with approximately 3,000 samples, the dataset favours models with stronger inductive biases over data-hungry architectures. The reduced parameter count of the CNN (1.24M versus 2.4M+ for Transformers) additionally promotes better generalisation by avoiding memorisation of training examples.
+Reasons for CNN outperformance over Transformers:
 
-The pure LSTM model performs worst (69.74%) because treating image rows as temporal sequences fails to capture the spatial coherence of gait patterns. The CNN-LSTM hybrid improves upon this by first extracting spatial features, yet the additional recurrent processing provides no benefit over the already temporally-encoded time surfaces.
+- **Local features are sufficient**: Gait patterns appear as localised spatial features in time surfaces. CNNs detect these through hierarchical convolutions; Transformers model global dependencies that are not needed here.
+- **Temporal information already encoded**: Time surface preprocessing bakes temporal dynamics into the spatial structure. No need for sequence modelling.
+- **Limited training data**: ~3,000 samples favour CNNs with strong inductive biases over data-hungry Transformers.
+- **Fewer parameters**: 1.24M vs 2.4M+ reduces overfitting risk on small datasets.
+- **Fastest inference**: 31.1 ms enables real-time live prediction.
+
+Possible reasons for LSTM models underperformance:
+
+- Pure LSTM (69.74%): Treating image rows as sequences ignores spatial coherence of gait patterns.
+- CNN-LSTM (87.83%): Spatial features help, but recurrent processing adds no benefit over already temporally-encoded inputs.
 
 ### Possible Improvements
 
