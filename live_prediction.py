@@ -340,7 +340,7 @@ def main():
                         cnn_prediction = cnn_model.predict(cnn_input, verbose=0)
                         cnn_time_ms = (time.perf_counter() - cnn_start) * 1000
                         print(f"CNN Classification Probabilities: {cnn_prediction[0]} ({cnn_time_ms:.1f}ms)")
-                        cnn_result = f"CNN: {_parse_prediction(cnn_prediction[0])}"
+                        cnn_result = f"CNN: {_parse_prediction(cnn_prediction[0], confidence_threshold=0.8)}"
                         
                         # Log CNN classification
                         if ":" in cnn_result:
@@ -354,7 +354,7 @@ def main():
                         snn_prediction = predict_snn(snn_model, features=snn_input)
                         snn_time_ms = (time.perf_counter() - snn_start) * 1000
                         print(f"SNN Classification Probabilities: {snn_prediction} ({snn_time_ms:.1f}ms)")    
-                        snn_result = f"SNN: {_parse_prediction(snn_prediction)}"
+                        snn_result = f"SNN: {_parse_prediction(snn_prediction, confidence_threshold=0.8)}"
                         
                         # Log SNN classification
                         if ":" in snn_result:
@@ -398,14 +398,14 @@ def main():
         filtered_events = noise_filter.generateEvents()
         filtered_count = len(filtered_events) if filtered_events is not None else 0
         
-        # Use filtered events for visualization
+        # Use filtered events for visualization and classification
         viz_events = filtered_events if filtered_events is not None and len(filtered_events) > 0 else events
         
-        # Submit RAW events to classification thread (training data was already filtered)
+        # Submit filtered events to classification thread
         # Only submit if queue is empty (drop frames if classifier is busy)
-        if classification_queue.empty() and len(events) > 0:
+        if classification_queue.empty() and filtered_count > 0:
             try:
-                classification_queue.put_nowait(events)
+                classification_queue.put_nowait(filtered_events)
             except queue.Full:
                 pass  # Skip this frame if queue is full
         
