@@ -221,6 +221,8 @@ The figure below shows the training progress over 150 epochs, displaying loss an
 
 tbd;
 
+Whats missing the the certainty threshold
+
 ![SNN Accuracy](assets/snn_acc.png "SNN Accuracy")
 
 | SNN | CNN |

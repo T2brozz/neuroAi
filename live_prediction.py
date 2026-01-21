@@ -149,8 +149,8 @@ def preprocess_events_for_snn(events, camera):
     
     Uses the same preprocessing as training:
     - Extract features at full resolution (640x480) using time_surface method
-    - Downsample features to 64x48 using area averaging
-    - Output shape: (6144,) = 64 * 48 * 2 channels
+    - Downsample features to 128x96 using area averaging
+    - Output shape: (24576,) = 128 * 96 * 2 channels
     """
     from models.preprocessing import downsample_features
     
@@ -168,8 +168,8 @@ def preprocess_events_for_snn(events, camera):
     orig_width, orig_height = _event_resolution_wh(camera)
     
     # Match training preprocessing parameters
-    TARGET_WIDTH = 64
-    TARGET_HEIGHT = 48
+    TARGET_WIDTH = 128
+    TARGET_HEIGHT = 96
     FEATURE_METHOD = "time_surface"
     
     # Extract features at full resolution (same as training)
