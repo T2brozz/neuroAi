@@ -76,19 +76,20 @@ def compute_event_centroid(events):
     
     return (centroid_x, centroid_y)
 
-def preprocess_events_for_cnn(events, camera):
+def preprocess_events_for_cnn(events, camera, norm_mean=None, norm_std=None):
     """Convert events to format suitable for CNN inference.
     
     Uses the same preprocessing as training (from preprocess_data.py):
     - feature_method: 'time_surface'
-    - Resize to model expected size (480x640)
+    - Fixed 640x480 frame (camera data in upper-left, zeros elsewhere)
     - tau = 1e5 (100ms time constant)
+    - Global normalization using training statistics
     
     Output shape: (1, 480, 640, 2) matching the CNN model input.
     """
-    # Model expected dimensions
-    MODEL_HEIGHT = 480
-    MODEL_WIDTH = 640
+    # Training frame dimensions (camera data padded to this size)
+    FRAME_HEIGHT = 480
+    FRAME_WIDTH = 640
     
     # Handle empty / None input
     if events is None or len(events) == 0:
@@ -100,15 +101,17 @@ def preprocess_events_for_cnn(events, camera):
     if structured.size == 0:
         return None
     
-    # Get actual camera resolution
-    width, height = _event_resolution_wh(camera)
+    # Get actual camera resolution (e.g., 346x260 for DAVIS 346)
+    cam_width, cam_height = _event_resolution_wh(camera)
     
-    # Create time surface at camera resolution (2 channels: positive and negative events)
-    x_coords = np.clip(structured['x'], 0, width - 1).astype(np.int32)
-    y_coords = np.clip(structured['y'], 0, height - 1).astype(np.int32)
+    # Create time surface at fixed frame size (640x480)
+    # Camera data goes in upper-left corner, rest is zeros
+    x_coords = np.clip(structured['x'], 0, cam_width - 1).astype(np.int32)
+    y_coords = np.clip(structured['y'], 0, cam_height - 1).astype(np.int32)
     
-    surface_pos = np.zeros((height, width), dtype=np.float32)
-    surface_neg = np.zeros((height, width), dtype=np.float32)
+    # Create full-size surfaces (zeros by default)
+    surface_pos = np.zeros((FRAME_HEIGHT, FRAME_WIDTH), dtype=np.float32)
+    surface_neg = np.zeros((FRAME_HEIGHT, FRAME_WIDTH), dtype=np.float32)
     
     # Time surface: exponential decay based on event recency
     t_ref = structured['t'][-1]  # Most recent timestamp as reference
@@ -127,32 +130,49 @@ def preprocess_events_for_cnn(events, camera):
     np.maximum.at(surface_neg, (y_coords[neg_mask], x_coords[neg_mask]), decay[neg_mask])
     
     # Stack into 2-channel image: (H, W, 2) 
+    # No resize needed - already at target 640x480 with camera data in upper-left
     image = np.stack([surface_pos, surface_neg], axis=-1)
     
-    # Resize to model expected dimensions if needed
-    if height != MODEL_HEIGHT or width != MODEL_WIDTH:
-        image = cv.resize(image, (MODEL_WIDTH, MODEL_HEIGHT), interpolation=cv.INTER_LINEAR)
-    
-    # Z-score normalization (same as training with normalize_features)
-    mean = image.mean()
-    std = image.std()
-    if std > 0:
-        image = (image - mean) / std
+    # Z-score normalization using global training statistics
+    if norm_mean is not None and norm_std is not None:
+        # Reshape image to flat features, normalize, reshape back
+        flat = image.reshape(-1)
+        # Handle dimension mismatch (camera resolution may differ from training)
+        if len(flat) == len(norm_mean):
+            flat = (flat - norm_mean) / norm_std
+            image = flat.reshape(image.shape)
+        else:
+            # Fallback to per-sample normalization if dimensions don't match
+            mean = image.mean()
+            std = image.std()
+            if std > 0:
+                image = (image - mean) / std
+    else:
+        # Fallback to per-sample normalization
+        mean = image.mean()
+        std = image.std()
+        if std > 0:
+            image = (image - mean) / std
     
     # Add batch dimension: (1, H, W, 2)
     image = np.expand_dims(image, axis=0)
     
     return image
 
-def preprocess_events_for_snn(events, camera):
+def preprocess_events_for_snn(events, camera, norm_mean=None, norm_std=None):
     """Convert events to format suitable for SNN inference.
     
     Uses the same preprocessing as training:
-    - Extract features at full resolution (640x480) using time_surface method
+    - Create time surface at fixed 640x480 frame (camera data in upper-left)
     - Downsample features to 128x96 using area averaging
+    - Global normalization using training statistics
     - Output shape: (24576,) = 128 * 96 * 2 channels
     """
     from models.preprocessing import downsample_features
+    
+    # Training frame dimensions (camera data padded to this size)
+    FRAME_WIDTH = 640
+    FRAME_HEIGHT = 480
     
     # Handle empty / None input
     if events is None or len(events) == 0:
@@ -164,31 +184,48 @@ def preprocess_events_for_snn(events, camera):
     if structured.size == 0:
         return None
 
-    # Get camera resolution
-    orig_width, orig_height = _event_resolution_wh(camera)
+    # Get camera resolution (e.g., 346x260 for DAVIS 346)
+    cam_width, cam_height = _event_resolution_wh(camera)
     
     # Match training preprocessing parameters
     TARGET_WIDTH = 128
     TARGET_HEIGHT = 96
-    FEATURE_METHOD = "time_surface"
     
-    # Extract features at full resolution (same as training)
-    features_full = events_to_features(
-        structured,
-        method=FEATURE_METHOD,
-        width=orig_width,
-        height=orig_height,
-    )
+    # Create time surface at fixed frame size (640x480)
+    # Camera data goes in upper-left corner, rest is zeros - matching training
+    x_coords = np.clip(structured['x'], 0, cam_width - 1).astype(np.int32)
+    y_coords = np.clip(structured['y'], 0, cam_height - 1).astype(np.int32)
     
-    features_full = features_full.astype(np.float32, copy=False)
+    # Create full-size surfaces (zeros by default)
+    surface_pos = np.zeros((FRAME_HEIGHT, FRAME_WIDTH), dtype=np.float32)
+    surface_neg = np.zeros((FRAME_HEIGHT, FRAME_WIDTH), dtype=np.float32)
+    
+    # Time surface: exponential decay based on event recency
+    t_ref = structured['t'][-1]  # Most recent timestamp as reference
+    tau = 1e5  # Time constant in microseconds (100ms) - matches training
+    
+    # Compute decay values
+    dt = t_ref - structured['t']
+    decay = np.exp(-dt / tau).astype(np.float32)
+    
+    # Separate by polarity
+    pos_mask = structured['p'] == 1
+    neg_mask = ~pos_mask
+    
+    # Use maximum decay value at each pixel (most recent event dominates)
+    np.maximum.at(surface_pos, (y_coords[pos_mask], x_coords[pos_mask]), decay[pos_mask])
+    np.maximum.at(surface_neg, (y_coords[neg_mask], x_coords[neg_mask]), decay[neg_mask])
+    
+    # Flatten to feature vector: [pos_channel, neg_channel]
+    features_full = np.concatenate([surface_pos.flatten(), surface_neg.flatten()])
     
     # Downsample features using area averaging (same as training)
     # downsample_features expects (n_samples, features), so add batch dim
     features_batch = features_full.reshape(1, -1)
     features_downsampled = downsample_features(
         features_batch,
-        orig_width=orig_width,
-        orig_height=orig_height,
+        orig_width=FRAME_WIDTH,
+        orig_height=FRAME_HEIGHT,
         target_width=TARGET_WIDTH,
         target_height=TARGET_HEIGHT,
         n_channels=2,  # time_surface has 2 channels (pos/neg)
@@ -197,11 +234,22 @@ def preprocess_events_for_snn(events, camera):
     # Remove batch dimension
     features = features_downsampled.squeeze(0)
     
-    # Normalize features (z-score normalization as in training)
-    mean = features.mean()
-    std = features.std()
-    if std > 0:
-        features = (features - mean) / std
+    # Normalize features using global training statistics
+    if norm_mean is not None and norm_std is not None:
+        if len(features) == len(norm_mean):
+            features = (features - norm_mean) / norm_std
+        else:
+            # Fallback to per-sample normalization if dimensions don't match
+            mean = features.mean()
+            std = features.std()
+            if std > 0:
+                features = (features - mean) / std
+    else:
+        # Fallback to per-sample normalization
+        mean = features.mean()
+        std = features.std()
+        if std > 0:
+            features = (features - mean) / std
 
     return features
 
@@ -211,6 +259,20 @@ def main():
     # Log file path for non-uncertain classifications
     log_path = Path(f'logs/{datetime.now().strftime("live_predictions_%Y%m%d_%H%M%S.log")}')
     log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load normalization statistics from training
+    norm_stats_path = Path('data/processed/norm_stats.npz')
+    if norm_stats_path.exists():
+        norm_stats = np.load(norm_stats_path)
+        norm_mean = norm_stats['mean']
+        norm_std = norm_stats['std']
+        print(f"Loaded normalization statistics from {norm_stats_path}")
+        print(f"  Mean shape: {norm_mean.shape}, Std shape: {norm_std.shape}")
+    else:
+        print(f"Warning: Normalization statistics not found at {norm_stats_path}")
+        print("  Using per-sample normalization (may reduce accuracy)")
+        norm_mean = None
+        norm_std = None
 
     # Open the camera, just use first detected DAVIS camera
     camera = dv.io.camera.DAVIS()
@@ -242,7 +304,10 @@ def main():
     # Threading setup for async classification
     classification_queue = queue.Queue(maxsize=1)  # Only keep latest events
     result_lock = threading.Lock()
-    current_classification = {"cnn": "CNN: None", "snn": "SNN: None", "timestamp": time.time()}
+    current_classification = {
+        "cnn": "CNN: None", "snn": "SNN: None", "timestamp": time.time(),
+        "cnn_time_ms": 0.0, "snn_time_ms": 0.0
+    }
     classification_running = threading.Event()
     classification_running.set()
     fps_history = deque(maxlen=30)
@@ -264,12 +329,17 @@ def main():
                 cnn_result = "CNN: None"
                 snn_result = "SNN: None"
                 
+                cnn_time_ms = 0.0
+                snn_time_ms = 0.0
+                
                 if len(events) > 0:
-                    # CNN inference
-                    cnn_input = preprocess_events_for_cnn(events, camera)
+                    # CNN inference (uses global normalization stats)
+                    cnn_start = time.perf_counter()
+                    cnn_input = preprocess_events_for_cnn(events, camera, norm_mean, norm_std)
                     if cnn_input is not None:
                         cnn_prediction = cnn_model.predict(cnn_input, verbose=0)
-                        print(f"CNN Classification Probabilities: {cnn_prediction[0]}")
+                        cnn_time_ms = (time.perf_counter() - cnn_start) * 1000
+                        print(f"CNN Classification Probabilities: {cnn_prediction[0]} ({cnn_time_ms:.1f}ms)")
                         cnn_result = f"CNN: {_parse_prediction(cnn_prediction[0])}"
                         
                         # Log CNN classification
@@ -277,11 +347,13 @@ def main():
                             model, label = cnn_result.split(":", 1)
                             _log_classification(log_path, model.strip(), label.strip())
                     
-                    # SNN inference
-                    snn_input = preprocess_events_for_snn(events, camera)
+                    # SNN inference (uses global normalization stats)
+                    snn_start = time.perf_counter()
+                    snn_input = preprocess_events_for_snn(events, camera, norm_mean, norm_std)
                     if snn_input is not None:
                         snn_prediction = predict_snn(snn_model, features=snn_input)
-                        print(f"SNN Classification Probabilities: {snn_prediction}")    
+                        snn_time_ms = (time.perf_counter() - snn_start) * 1000
+                        print(f"SNN Classification Probabilities: {snn_prediction} ({snn_time_ms:.1f}ms)")    
                         snn_result = f"SNN: {_parse_prediction(snn_prediction)}"
                         
                         # Log SNN classification
@@ -294,6 +366,8 @@ def main():
                     current_classification["cnn"] = cnn_result
                     current_classification["snn"] = snn_result
                     current_classification["timestamp"] = time.time()
+                    current_classification["cnn_time_ms"] = cnn_time_ms
+                    current_classification["snn_time_ms"] = snn_time_ms
                 
                 classification_queue.task_done()
                 
@@ -317,30 +391,34 @@ def main():
         
         original_count = len(events)
         
-        # Apply noise filter (fast operation)
+        # Apply noise filter for visualization only
+        # Note: Classification uses raw events because training data was already
+        # noise-filtered during recording (see davis/gait.xml config)
         noise_filter.accept(events)
         filtered_events = noise_filter.generateEvents()
         filtered_count = len(filtered_events) if filtered_events is not None else 0
         
-        # Use filtered events
-        events_to_process = filtered_events if filtered_events is not None and len(filtered_events) > 0 else events
+        # Use filtered events for visualization
+        viz_events = filtered_events if filtered_events is not None and len(filtered_events) > 0 else events
         
-        # Submit to classification thread (non-blocking)
+        # Submit RAW events to classification thread (training data was already filtered)
         # Only submit if queue is empty (drop frames if classifier is busy)
-        if classification_queue.empty() and len(events_to_process) > 0:
+        if classification_queue.empty() and len(events) > 0:
             try:
-                classification_queue.put_nowait(events_to_process)
+                classification_queue.put_nowait(events)
             except queue.Full:
                 pass  # Skip this frame if queue is full
         
-        # Generate visualization (fast operation)
-        event_image = visualizer.generateImage(events_to_process)
+        # Generate visualization with filtered events
+        event_image = visualizer.generateImage(viz_events)
         
         # Get current classification results (cached from background thread)
         with result_lock:
             cnn_result = current_classification["cnn"]
             snn_result = current_classification["snn"]
             classification_age = current_time - current_classification["timestamp"]
+            cnn_time_ms = current_classification["cnn_time_ms"]
+            snn_time_ms = current_classification["snn_time_ms"]
         
         # Add text overlays (fixed positions for performance)
         font = cv.FONT_HERSHEY_SIMPLEX
@@ -364,6 +442,10 @@ def main():
             age_color = (0, 0, 255)  # Red = stale
         cv.putText(event_image, f"Class age: {classification_age:.1f}s", 
                   (10, 90), font, 0.5, age_color, 1)
+        
+        # Inference times (top left, below class age)
+        cv.putText(event_image, f"CNN: {cnn_time_ms:.0f}ms | SNN: {snn_time_ms:.0f}ms", 
+                  (10, 115), font, 0.5, (255, 255, 255), 1)
         
         # SNN classification (bottom left)
         cv.putText(event_image, snn_result, 

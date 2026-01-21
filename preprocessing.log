@@ -1,0 +1,162 @@
+============================================================
+Event Data Preprocessing Pipeline
+============================================================
+
+Configuration:
+  feature_method: time_surface
+  n_bins: 10
+  activity_window_ms: 1000
+  activity_min_events: 75000
+  event_window_ms: 1000
+  val_split: 0.2
+  test_split: 0.1
+  random_seed: 42
+  keep_labels: ['mark', 'marvin', 'yannes']
+  stale_label: stale
+  other_label: unknown
+
+Step 1: Loading event data and extracting features...
+Found 51 files with 13 classes:
+  anne: 10 files
+  benjamin: 1 files
+  christian: 1 files
+  felix: 1 files
+  jonas: 1 files
+  leon: 1 files
+  mark: 7 files
+  marvin: 13 files
+  ohman: 1 files
+  veronica: 1 files
+  yannes: 13 files
+  zaid: 1 files
+  stale: 0 files
+  ('stale' label will be assigned to low-activity windows)
+
+Counting windows in 51 files...
+  Total windows: 6891
+  Feature dim: 614400
+  Estimated size: 15.77 GB
+
+Creating memory-mapped arrays in data/processed/temp...
+
+Processing 51 files sequentially...
+  anne_dvSave-2026_01_20_16_31_50.npy: 122 windows (92 stale)
+  anne_dvSave-2026_01_20_16_34_05.npy: 127 windows (96 stale)
+  anne_dvSave-2026_01_20_16_36_30.npy: 129 windows (97 stale)
+  anne_dvSave-2026_01_20_16_38_49.npy: 126 windows (98 stale)
+  anne_dvSave-2026_01_20_16_41_01.npy: 129 windows (96 stale)
+  anne_dvSave-2026_01_20_16_46_45.npy: 128 windows (92 stale)
+  anne_dvSave-2026_01_20_16_49_00.npy: 130 windows (97 stale)
+  anne_dvSave-2026_01_20_16_51_18.npy: 128 windows (96 stale)
+  anne_dvSave-2026_01_20_16_53_32.npy: 129 windows (98 stale)
+  anne_dvSave-2026_01_20_16_55_54.npy: 125 windows (93 stale)
+  benjamin_dvSave-2025_12_04_11_12_56.npy: 62 windows (37 stale)
+  christian_dvSave-2025_12_04_11_06_41.npy: 64 windows (28 stale)
+  felix_dvSave-2025_12_04_11_18_38.npy: 66 windows (26 stale)
+  jonas_dvSave-2025_12_04_11_24_28.npy: 62 windows (28 stale)
+  leon_dvSave-2025_12_04_11_09_49.npy: 62 windows (29 stale)
+  mark_dvSave-2025_12_04_11_01_22.npy: 67 windows (29 stale)
+  mark_dvSave-2026_01_08_11_22_49.npy: 226 windows (112 stale)
+  mark_dvSave-2026_01_08_11_27_19.npy: 239 windows (117 stale)
+  mark_dvSave-2026_01_15_11_50_35.npy: 180 windows (100 stale)
+  mark_dvSave-2026_01_15_11_53_53.npy: 225 windows (113 stale)
+  mark_dvSave-2026_01_15_11_58_54.npy: 201 windows (107 stale)
+  mark_dvSave-2026_01_15_12_03_43.npy: 271 windows (143 stale)
+  marvin_dvSave-2025_11_27_12_37_39.npy: 46 windows (31 stale)
+  marvin_dvSave-2025_12_04_11_03_30.npy: 67 windows (32 stale)
+  marvin_dvSave-2025_12_04_11_26_48.npy: 62 windows (33 stale)
+  marvin_dvSave-2025_12_04_11_28_13.npy: 63 windows (33 stale)
+  marvin_dvSave-2025_12_04_11_29_24.npy: 63 windows (33 stale)
+  marvin_dvSave-2025_12_04_11_30_37.npy: 61 windows (33 stale)
+  marvin_dvSave-2026_01_08_11_09_06.npy: 178 windows (89 stale)
+  marvin_dvSave-2026_01_08_11_12_56.npy: 166 windows (89 stale)
+  marvin_dvSave-2026_01_08_11_16_37.npy: 189 windows (100 stale)
+  marvin_dvSave-2026_01_15_10_47_57.npy: 170 windows (100 stale)
+  marvin_dvSave-2026_01_15_10_51_55.npy: 172 windows (94 stale)
+  marvin_dvSave-2026_01_15_10_55_32.npy: 166 windows (89 stale)
+  marvin_dvSave-2026_01_15_11_00_39.npy: 167 windows (88 stale)
+  ohman_dvSave-2025_12_04_11_08_19.npy: 62 windows (24 stale)
+  veronica_dvSave-2025_12_04_11_15_37.npy: 67 windows (30 stale)
+  yannes_dvSave-2025_11_27_12_36_22.npy: 34 windows (17 stale)
+  yannes_dvSave-2025_12_04_11_05_11.npy: 63 windows (27 stale)
+  yannes_dvSave-2026_01_08_10_48_45.npy: 64 windows (36 stale)
+  yannes_dvSave-2026_01_08_10_50_45.npy: 57 windows (29 stale)
+  yannes_dvSave-2026_01_08_10_53_07.npy: 61 windows (35 stale)
+  yannes_dvSave-2026_01_08_10_54_45.npy: 60 windows (31 stale)
+  yannes_dvSave-2026_01_08_10_56_50.npy: 182 windows (98 stale)
+  yannes_dvSave-2026_01_08_11_02_19.npy: 280 windows (152 stale)
+  yannes_dvSave-2026_01_15_10_23_07.npy: 273 windows (172 stale)
+  yannes_dvSave-2026_01_15_10_30_04.npy: 183 windows (121 stale)
+  yannes_dvSave-2026_01_15_10_34_39.npy: 186 windows (114 stale)
+  yannes_dvSave-2026_01_15_10_40_29.npy: 176 windows (110 stale)
+  yannes_dvSave-2026_01_15_11_05_47.npy: 181 windows (90 stale)
+  zaid_dvSave-2025_11_27_12_39_38.npy: 43 windows (27 stale)
+
+Total windows marked as 'stale': 3781
+
+Finalizing arrays (actual size: 6540 samples)...
+
+Dataset loaded: X.shape=(6540, 614400), y.shape=(6540,)
+  Note: Data stored in memory-mapped files at data/processed/temp
+  Files will be cleaned up when arrays are deleted or process exits.
+
+Step 2: Remapping labels...
+  Remapping labels in-place...
+  Final classes: ['mark', 'marvin', 'yannes', 'unknown', 'stale']
+    0: mark (688 samples)
+    1: marvin (726 samples)
+    2: yannes (768 samples)
+    3: unknown (577 samples)
+    4: stale (3781 samples)
+
+Step 3: Balancing stale class...
+  Non-stale class counts: [688, 726, 768, 577]
+  Average non-stale count: 689
+  Current stale count: 3781
+  Reducing stale class from 3781 to 689 samples
+  Total samples: 6540 -> 3448
+
+  Final balanced class distribution:
+    0: mark (688 samples)
+    1: marvin (726 samples)
+    2: yannes (768 samples)
+    3: unknown (577 samples)
+    4: stale (689 samples)
+
+Step 4: Normalizing features...
+  Computing statistics over 6540 samples...
+  Normalizing in chunks...
+  Saved normalization statistics to data/processed/norm_stats.npz
+
+Step 5: Creating shuffled indices...
+  Created shuffle permutation with seed: 42
+  Final dataset size: 3448 samples
+
+Step 6: Splitting dataset...
+  train: 2413 samples
+  val: 690 samples
+  test: 345 samples
+
+Step 7: Saving preprocessed data...
+  Saving train: 2413 samples...
+  Saving val: 690 samples...
+  Saving test: 345 samples...
+
+Saved preprocessed data to data/processed
+
+Step 8: Cleaning up temporary files...
+
+============================================================
+Preprocessing complete!
+============================================================
+
+Class mapping:
+  0: mark
+  1: marvin
+  2: yannes
+  3: unknown
+  4: stale
+
+Feature dimensions: 614400
+Number of classes: 5
+Output directory: data/processed

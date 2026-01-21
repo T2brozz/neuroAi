@@ -144,9 +144,14 @@ def main():
     del y_array, y_balanced
     gc.collect()
     
-    # Normalize in chunks (keeps data in memmap)
+    # Normalize in chunks (keeps data in memmap) and save statistics
     print("\nStep 4: Normalizing features...")
-    X = normalize_features(X)
+    X, norm_mean, norm_std = normalize_features(X, return_stats=True)
+    
+    # Save normalization statistics for use in live prediction
+    norm_stats_path = save_dir / 'norm_stats.npz'
+    np.savez(norm_stats_path, mean=norm_mean, std=norm_std)
+    print(f"  Saved normalization statistics to {norm_stats_path}")
     
     # Shuffle the balanced indices (not the data itself)
     print("\nStep 5: Creating shuffled indices...")

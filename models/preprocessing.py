@@ -586,7 +586,13 @@ def load_dataset(data_dir: Path,
     return X, y, unique_labels
 
 
-def normalize_features(X: np.ndarray, chunk_size: int = 500) -> np.ndarray:
+def normalize_features(
+    X: np.ndarray,
+    chunk_size: int = 500,
+    mean: np.ndarray = None,
+    std: np.ndarray = None,
+    return_stats: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Normalize feature vectors using standard (z-score) normalization.
     Works with memory-mapped arrays by processing in chunks.
@@ -594,33 +600,41 @@ def normalize_features(X: np.ndarray, chunk_size: int = 500) -> np.ndarray:
     Args:
         X: Feature array (can be memmap)
         chunk_size: Number of samples to process at a time for stats
+        mean: Pre-computed mean (if None, computed from X)
+        std: Pre-computed std (if None, computed from X)
+        return_stats: If True, return (X, mean, std) tuple
         
     Returns:
-        Normalized array (in-place if X is memmap)
+        Normalized array (in-place if X is memmap), or (X, mean, std) if return_stats=True
     """
     n_samples, n_features = X.shape
-    print(f"  Computing statistics over {n_samples} samples...")
     
-    # Compute mean and std incrementally using Welford's algorithm
-    # to avoid loading all data into memory
-    mean = np.zeros(n_features, dtype=np.float64)
-    M2 = np.zeros(n_features, dtype=np.float64)
-    count = 0
-    
-    for start in range(0, n_samples, chunk_size):
-        end = min(start + chunk_size, n_samples)
-        chunk = X[start:end].astype(np.float64)
+    # Use provided stats or compute them
+    if mean is None or std is None:
+        print(f"  Computing statistics over {n_samples} samples...")
         
-        for row in chunk:
-            count += 1
-            delta = row - mean
-            mean += delta / count
-            delta2 = row - mean
-            M2 += delta * delta2
-    
-    std = np.sqrt(M2 / count).astype(np.float32)
-    mean = mean.astype(np.float32)
-    std[std == 0] = 1
+        # Compute mean and std incrementally using Welford's algorithm
+        # to avoid loading all data into memory
+        _mean = np.zeros(n_features, dtype=np.float64)
+        M2 = np.zeros(n_features, dtype=np.float64)
+        count = 0
+        
+        for start in range(0, n_samples, chunk_size):
+            end = min(start + chunk_size, n_samples)
+            chunk = X[start:end].astype(np.float64)
+            
+            for row in chunk:
+                count += 1
+                delta = row - _mean
+                _mean += delta / count
+                delta2 = row - _mean
+                M2 += delta * delta2
+        
+        std = np.sqrt(M2 / count).astype(np.float32)
+        mean = _mean.astype(np.float32)
+        std[std == 0] = 1
+    else:
+        print(f"  Using provided normalization statistics...")
     
     # Normalize in-place in chunks
     print(f"  Normalizing in chunks...")
@@ -631,6 +645,8 @@ def normalize_features(X: np.ndarray, chunk_size: int = 500) -> np.ndarray:
         if hasattr(X, 'flush'):
             X.flush()
     
+    if return_stats:
+        return X, mean, std
     return X
 
 
