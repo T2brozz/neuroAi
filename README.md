@@ -59,13 +59,20 @@ Each pixel measures recent events, and their positive or negative values create 
 
 ![Window Graph](assets/window.png "Window Graph")
 
-## Convolutional Neural Network (CNN)
+## Traditional Neural Networks
 
-The CNN approach converts the preprocessed time surface features back into 2-channel images and applies various deep learning architectures for classification.
+The traditional neural network approach converts the preprocessed time surface features into 2-channel images and applies various deep learning architectures for classification. This section presents a systematic evaluation of multiple architectures, identifies the optimal model configuration, and analyses the factors contributing to performance differences.
 
-### Image Reconstruction from Features
+### Feature Preprocessing for CNN
 
-The preprocessed feature vectors (614,400 floats per sample) are converted back to 2-channel images representing positive and negative event polarities. Each channel captures the temporal decay pattern of events with the respective polarity.
+The preprocessed feature vectors are converted to 2-channel images representing positive and negative event polarities. Each channel captures the temporal decay pattern of events with the respective polarity, preserving both spatial and temporal structure of the event data.
+
+| Stage | Shape | Features |
+| ----- | ----- | -------- |
+| Original Vector | 614,400 × 1 | Flattened time surface |
+| Split Channels | 307,200 × 2 | Positive and negative surfaces |
+| Reshaped | 480 × 640 × 2 | Full resolution image |
+| Downsampled | 192 × 256 × 2 | Model input size |
 
 ```mermaid
 flowchart LR
@@ -81,20 +88,16 @@ flowchart LR
     I --> J[Model Input]
 ```
 
-The two channels encode:
-- **Channel 1 (Positive)**: Time surface of positive polarity events (brightness increases)
-- **Channel 2 (Negative)**: Time surface of negative polarity events (brightness decreases)
+The two channels encode brightness increases (positive polarity) and brightness decreases (negative polarity) respectively. This representation enables the use of standard image-based deep learning architectures while maintaining the event-driven nature of the data.
 
-This representation preserves the temporal and spatial structure of the event data while enabling the use of standard image-based deep learning architectures.
+### Architecture Comparison
 
-### Model Architectures Evaluated
-
-We evaluated multiple model types to identify the best architecture for gait classification on event-based data:
+To identify the optimal architecture for gait classification on event-based data, a evaluation of eight model types was conducted. The selection encompasses pure convolutional networks, Vision Transformers with various enhancements, and recurrent architectures to assess which inductive biases best suit the task.
 
 | Model | Type | Key Innovation | Rationale |
 | ----- | ---- | -------------- | --------- |
 | Simple CNN Large | Pure CNN | 4-block convolutional architecture | Baseline model with strong local feature extraction capabilities |
-| Basic Transformer VIT | Vision Transformer | Patch embedding with self-attention | Captures global spatial relationships across the entire image |
+| Basic Transformer ViT | Vision Transformer | Patch embedding with self-attention | Captures global spatial relationships across the entire image |
 | Improved Transformer | ViT + Stochastic Depth | Random layer dropping during training | Reduces overfitting on small datasets through regularization |
 | CLS-Token Transformer | ViT + Classification Token | Learnable token for aggregating features | Standard ViT approach with dedicated classification representation |
 | Relative Position Transformer | ViT + 2D Relative Encoding | Learns relative spatial relationships | Position-agnostic pattern recognition for gait features |
@@ -102,70 +105,94 @@ We evaluated multiple model types to identify the best architecture for gait cla
 | LSTM | Recurrent | Image rows as temporal sequence | Models sequential patterns in gait motion |
 | CNN-LSTM | Hybrid Sequential | CNN features fed to bidirectional LSTM | Combines spatial feature extraction with temporal modeling |
 
+The figures below present the comparative evaluation results. The first figure displays validation and test accuracy across all architectures, while the second figure analyses inference time, model confidence, and parameter counts.
+
+![model_accuracy](notebooks/traditional_nn/runs/models/comparison/model_accuacy.png)
+
+![model_inference](notebooks/traditional_nn/runs/models/comparison/inference_analysis.png)
+
+The evaluation reveals that the Simple CNN Large architecture significantly outperforms all other approaches, achieving 95.07% test accuracy compared to the next-best Hybrid CNN-Transformer at 90.46%. The complete quantitative comparison is summarised in the table below.
+
+| Model | Test Accuracy | Inference Time | Parameters |
+| ----- | ------------- | -------------- | ---------- |
+| Simple CNN Large | 95.07% | 31.1 ms | 1.24M |
+| Hybrid CNN-Transformer | 90.46% | 36.3 ms | 2.23M |
+| Relative Position Transformer | 89.80% | 38.2 ms | 2.46M |
+| CLS-Token Transformer | 89.47% | 38.5 ms | 2.44M |
+| Improved Transformer | 88.16% | 38.0 ms | 2.44M |
+| CNN-LSTM | 87.83% | 37.0 ms | 5.57M |
+| Basic Transformer ViT | 83.88% | 38.5 ms | 2.44M |
+| LSTM | 69.74% | 54.5 ms | 0.86M |
+
+Reasons for CNN outperformance over Transformers:
+
+- **Local features are sufficient**: Gait patterns appear as localised spatial features in time surfaces. CNNs detect these through hierarchical convolutions; Transformers model global dependencies that are not needed here.
+- **Temporal information already encoded**: Time surface preprocessing bakes temporal dynamics into the spatial structure. No need for sequence modelling.
+- **Limited training data**: ~3,000 samples favour CNNs with strong inductive biases over data-hungry Transformers.
+- **Fewer parameters**: 1.24M vs 2.4M+ reduces overfitting risk on small datasets.
+- **Fastest inference**: 31.1 ms enables real-time live prediction.
+
+Possible reasons for LSTM models underperformance:
+
+- Pure LSTM (69.74%): Treating image rows as sequences ignores spatial coherence of gait patterns.
+- CNN-LSTM (87.83%): Spatial features help, but recurrent processing adds no benefit over already temporally-encoded inputs.
+
+### Possible Improvements
+
+While the current CNN-based approach achieves strong results, several architectural alternatives could potentially improve performance or efficiency:
+
+| Approach | Description | Potential Benefit |
+| -------- | ----------- | ----------------- |
+| Event-Stream LSTM/RNN | Feed raw event sequences (x, y, t, p) directly to recurrent networks instead of converting to images | Preserves exact temporal resolution; avoids information loss from time surface binning |
+| Spatio-Temporal Graphs | Model events as nodes in a graph with spatial and temporal edges | Captures event relationships without fixed grid discretisation |
+| Event-based Attention | Apply attention mechanisms directly on event sequences rather than image patches | Learns which events are most relevant for classification |
+| Larger Dataset | Collect more subjects and walking conditions | Would enable effective use of higher-capacity models like Transformers |
+| Data Augmentation | Apply event-specific augmentations (temporal jitter, spatial noise, polarity flipping) | Increases effective dataset size without additional collection |
+
 ### Simple CNN Large Architecture
 
-The Simple CNN Large model achieved the best performance and serves as the primary CNN architecture. It uses a classic convolutional design optimized for the 2-channel event image input.
+The Simple CNN Large model achieved the best performance across all evaluated architectures and serves as the primary CNN implementation. The architecture employs a classic convolutional design with four progressive feature extraction blocks, optimised for the 2-channel event image input.
 
-```mermaid
-flowchart TD
-    subgraph Input
-        A[Input: 480 × 640 × 2]
-        A --> B[Resize: 192 × 256 × 2]
-    end
-
-    subgraph Block1[Conv Block 1]
-        B --> C1[Conv2D 32, 3×3, ReLU]
-        C1 --> C2[Conv2D 32, 3×3, ReLU]
-        C2 --> C3[MaxPool 2×2]
-        C3 --> C4[Dropout 0.25]
-    end
-
-    subgraph Block2[Conv Block 2]
-        C4 --> D1[Conv2D 64, 3×3, ReLU]
-        D1 --> D2[Conv2D 64, 3×3, ReLU]
-        D2 --> D3[MaxPool 2×2]
-        D3 --> D4[Dropout 0.25]
-    end
-
-    subgraph Block3[Conv Block 3]
-        D4 --> E1[Conv2D 128, 3×3, ReLU]
-        E1 --> E2[Conv2D 128, 3×3, ReLU]
-        E2 --> E3[MaxPool 2×2]
-        E3 --> E4[Dropout 0.25]
-    end
-
-    subgraph Block4[Conv Block 4]
-        E4 --> F1[Conv2D 256, 3×3, ReLU]
-        F1 --> F2[Conv2D 256, 3×3, ReLU]
-        F2 --> F3[MaxPool 2×2]
-        F3 --> F4[Dropout 0.25]
-    end
-
-    subgraph Head[Classification Head]
-        F4 --> G1[Global Average Pooling]
-        G1 --> G2[Dense 256, ReLU]
-        G2 --> G3[Dropout 0.5]
-        G3 --> G4[Dense 5, Softmax]
-    end
-```
-
-**Architecture Details:**
-
-| Component | Configuration | Output Shape |
-| --------- | ------------- | ------------ |
-| Input | 2-channel event image | 480 × 640 × 2 |
-| Resizing | Bilinear interpolation | 192 × 256 × 2 |
-| Conv Block 1 | 2 × Conv2D(32), MaxPool, Dropout(0.25) | 96 × 128 × 32 |
-| Conv Block 2 | 2 × Conv2D(64), MaxPool, Dropout(0.25) | 48 × 64 × 64 |
-| Conv Block 3 | 2 × Conv2D(128), MaxPool, Dropout(0.25) | 24 × 32 × 128 |
-| Conv Block 4 | 2 × Conv2D(256), MaxPool, Dropout(0.25) | 12 × 16 × 256 |
-| Global Avg Pool | Spatial averaging | 256 |
-| Dense | Fully connected with ReLU | 256 |
-| Output | Softmax classification | 5 classes |
+| | Layer | Configuration | Output |
+| ----- | ----- | ------------- | ------ |
+| &rarr; | Input | 2-channel event image | 480 × 640 × 2 |
+| &darr; | Resizing | Bilinear interpolation | 192 × 256 × 2 |
+| &darr; | Conv Block 1 | 2 × Conv2D(32, 3×3), BatchNorm, ReLU, MaxPool(2×2), Dropout(0.25) | 96 × 128 × 32 |
+| &darr; | Conv Block 2 | 2 × Conv2D(64, 3×3), BatchNorm, ReLU, MaxPool(2×2), Dropout(0.25) | 48 × 64 × 64 |
+| &darr; | Conv Block 3 | 2 × Conv2D(128, 3×3), BatchNorm, ReLU, MaxPool(2×2), Dropout(0.25) | 24 × 32 × 128 |
+| &darr; | Conv Block 4 | 2 × Conv2D(256, 3×3), BatchNorm, ReLU, MaxPool(2×2), Dropout(0.25) | 12 × 16 × 256 |
+| &darr; | Global Avg Pool | Spatial averaging | 256 |
+| &darr; | Dense | Fully connected, ReLU, Dropout(0.5) | 256 |
+| &larr; | Output | Softmax classification | 5 classes |
 
 **Total Parameters:** 1,239,045
 
-The architecture progressively increases filter depth (32 → 64 → 128 → 256) while reducing spatial dimensions through max pooling. Dropout regularization at 0.25 after each convolutional block and 0.5 before the output layer helps prevent overfitting on the relatively small dataset. Global average pooling replaces traditional flattening to reduce parameter count and improve generalization.
+The architecture progressively increases filter depth (32 → 64 → 128 → 256) while reducing spatial dimensions through max pooling, which creates a hierarchical feature representation from low-level edge detectors to high-level gait pattern recognisers. Global average pooling replaces traditional flattening to reduce parameter count and improve spatial invariance.
+
+**Hyperparameters:**
+
+| Parameter | Value | Description |
+| --------- | ----- | ----------- |
+| Learning Rate | 1e-3 | Initial Adam optimiser learning rate |
+| Batch Size | 32 | Samples per gradient update |
+| Dropout (Conv) | 0.25 | Regularisation after each convolutional block |
+| Dropout (Dense) | 0.5 | Regularisation before output layer |
+| Kernel Size | 3 × 3 | Convolutional filter dimensions |
+| Pool Size | 2 × 2 | Max pooling window |
+
+**Training Strategy:**
+
+To prevent overfitting on the relatively small dataset, the training employs several regularisation techniques:
+
+- **Learning Rate Scheduling**: ReduceLROnPlateau callback monitors validation loss and reduces the learning rate by 50% after 5 epochs without improvement (minimum LR: 1e-6)
+- **Early Stopping**: Training terminates if validation loss shows no improvement for 15 epochs, with automatic restoration of the best weights
+- **Dropout Regularisation**: Applied after each convolutional block (0.25) and before the output layer (0.5) to prevent co-adaptation of features
+- **Batch Normalisation**: Stabilises training by normalising layer inputs, enabling higher learning rates and faster convergence
+
+The figure below illustrates the training dynamics over 66 epochs, displaying loss and accuracy curves for both training and validation sets. The close tracking between training and validation metrics indicates effective regularisation without significant overfitting.
+
+![CNN Training Curves](notebooks/traditional_nn/runs/models/simple_cnn_large_curves.png)
+
 
 ## Spiking Neural Network (SNN)
 
@@ -217,20 +244,36 @@ The figure below shows the training progress over 150 epochs, displaying loss an
 
 ![SNN Training Graph](assets/snn_train.png "SNN Training Graph")
 
-## Result Comparison and Live Prediction
+## Result and Confidence Comparison
 
-tbd;
+Both models are evaluated on the test set with a confidence threshold of 0.5—predictions below this are labeled "Uncertain."
 
-Whats missing the the certainty threshold
+### Confidence: Convolutional Neural Network (CNN)
 
-![SNN Accuracy](assets/snn_acc.png "SNN Accuracy")
+The figure below shows the CNN's prediction confidence distribution across the test set. Higher concentrations at high confidence levels indicate decisive predictions.
 
-| SNN | CNN |
-| --- | --- |
-| ![SNN Matrix](assets/snn_matrix.png "SNN Matrix") | tbd; |
+![CNN Confidence](notebooks/traditional_nn/runs/models/simple_cnn_large_confidence.png "CNN Confidence")
+
+### Confidence: Spiking Neural Network (SNN)
+
+The SNN confidence distribution reveals different prediction behavior, with confidence scores spread more evenly across ranges due to the spike-based computation.
+
+![SNN Confidence](assets/snn_acc.png "SNN Confidence")
+
+### Confidence Matrix
+
+The comparison of the confidence matrices shows that the CNN outperforms the SNN on the test split.
+
+![Comparison Matrix](assets/comp.png "Comparison Matrix")
 
 ## Live Prediction
 
-tbd;
+The video below shows live prediction with an unknown and a known person. The confidence threshold for both models was set to 0.8, using the latest models and parameters described in the model sections above.
 
 ![Live Prediction](assets/live.gif "Live Prediction")
+
+## Limitations
+
+- **Limited SNN exploration**: Further tuning of learning rate, training epochs, and hyperparameters could improve performance
+- **Insufficient training data**: More samples and a cleaner, edge-free recording environment would benefit model generalization
+- **Incorrect camera resolution during training**: Training data was preprocessed with the wrong resolution assumption
