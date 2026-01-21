@@ -173,35 +173,25 @@ The SNN approach uses biologically-inspired Leaky Integrate-and-Fire (LIF) neuro
 
 ### Feature Preprocessing for SNN
 
-The SNN uses spatially downsampled features via 5×5 area averaging:
+The SNN uses spatially downsampled features via 5 x 5 area averaging:
 
 | Stage | Shape | Features |
 | ----- | ----- | -------- |
-| Original | 640 × 480 × 2 | 614,400 |
-| Downsampled | 128 × 96 × 2 | 24,576 |
+| Original | 640 x 480 x 2 | 614,400 |
+| Downsampled | 128 x 96 x 2 | 24,576 |
 
-This 25× reduction in dimensionality enables efficient training while preserving the spatial structure of the event data.
+This 25x reduction in dimensionality enables efficient training while preserving the spatial structure of the event data.
 
 ### Model Architecture
 
-```mermaid
-flowchart LR
-    A[Input<br/>24,576] --> B[LIF Hidden<br/>107 neurons<br/>Heterogeneous]
-    B --> C[Linear Output<br/>5 classes]
-```
+| | Layer | Configuration | Parameters |
+| ----- | ----- | ------------- | ---------- |
+| &rarr; | Input | 24,576 features | Downsampled time surface (128 × 96 × 2) |
+| &darr; | Hidden | 107 LIF neurons | Heterogeneous: Gains ~ U(0.5, 1.5), Biases ~ U(-0.5, 0.5) |
+| &darr; | Connections | Glorot initialization | Input &rarr; Hidden: 24,576 x 107, Hidden &rarr; Output: 107 x 5 |
+| &larr; | Output | 5 classes | Linear readout (raw logits) |
 
-**Architecture Details:**
-
-| Component | Configuration | Description |
-| --------- | ------------- | ----------- |
-| Input | 24,576 dimensions | Downsampled time surface (128 × 96 × 2) |
-| Hidden Layer | 107 LIF neurons | Spiking neurons with heterogeneous parameters |
-| Neuron Params | Heterogeneous | Gains ~ U(0.5, 1.5), Biases ~ U(-0.5, 0.5) |
-| Weight Init | Glorot | Xavier/Glorot initialization |
-| Synaptic Filter | None | Single timestep inference |
-| Output | 5 classes | Linear readout (logits) |
-
-**Hyperparameters:**
+### Hyperparameters
 
 | Parameter | Value | Description |
 | --------- | ----- | ----------- |
@@ -223,6 +213,20 @@ To combat overfitting, the training uses several regularization techniques:
 
 Training uses NengoDL's TensorFlow backend with surrogate gradients for backpropagation through the non-differentiable spike function.
 
+The figure below shows the training progress over 150 epochs, displaying loss and accuracy curves for both training and validation sets.
+
+![SNN Training Graph](assets/snn_train.png "SNN Training Graph")
+
 ## Result Comparison and Live Prediction
+
+tbd;
+
+![SNN Accuracy](assets/snn_acc.png "SNN Accuracy")
+
+| SNN | CNN |
+| --- | --- |
+| ![SNN Matrix](assets/snn_matrix.png "SNN Matrix") | tbd; |
+
+## Live Prediction
 
 tbd;

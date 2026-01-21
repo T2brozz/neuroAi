@@ -31,7 +31,6 @@ seaborn = "*"
 python_version = "3.10"
 
 [scripts]
-start   = "python cam_to_opencv.py"
 predict = "python live_prediction.py"
 extract = "python feature_extraction.py"
 preprocess = "python preprocess_data.py"
