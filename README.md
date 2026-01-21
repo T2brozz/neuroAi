@@ -54,23 +54,10 @@ The `preprocess_data.py` script performs the following preprocessing steps:
 
 8. **Cleanup**: Removes temporary memory-mapped files used during processing.
 
-```mermaid
-flowchart TD
-    A[AEDAT4 Files] --> B[feature_extraction.py]
-    B --> C[.npy Event Arrays]
-    C --> D[preprocess_data.py]
+The figure below illustrates a sample event window after preprocessing, showing the time surface visualization that represents event activity patterns over the 1-second temporal window.
+Each pixel measures recent events, and their positive or negative values create movement patterns.
 
-    subgraph Preprocessing Pipeline
-        D --> E[Load & Extract Features]
-        E --> F[Label Remapping]
-        F --> G[Class Balancing]
-        G --> H[Z-Score Normalization]
-        H --> I[Index Shuffling]
-        I --> J[Train/Val/Test Split]
-    end
-
-    J --> K[data/processed/]
-```
+![Window Graph](assets/window.png "Window Graph")
 
 ## Convolutional Neural Network (CNN)
 
@@ -186,33 +173,53 @@ The SNN approach uses biologically-inspired Leaky Integrate-and-Fire (LIF) neuro
 
 ### Feature Preprocessing for SNN
 
-The SNN uses spatially downsampled features (128 x 96 x 2 = 24,576) via 5 x 5 area averaging, providing a 25x reduction in dimensionality while preserving spatial structure.
+The SNN uses spatially downsampled features via 5×5 area averaging:
+
+| Stage | Shape | Features |
+| ----- | ----- | -------- |
+| Original | 640 × 480 × 2 | 614,400 |
+| Downsampled | 128 × 96 × 2 | 24,576 |
+
+This 25× reduction in dimensionality enables efficient training while preserving the spatial structure of the event data.
 
 ### Model Architecture
 
 ```mermaid
 flowchart LR
-    A[Input<br/>24,576] --> B[LIF Hidden<br/>107 neurons]
+    A[Input<br/>24,576] --> B[LIF Hidden<br/>107 neurons<br/>Heterogeneous]
     B --> C[Linear Output<br/>5 classes]
 ```
 
-#### Architecture Details
+**Architecture Details:**
 
-| Component | Configuration |
-| --------- | ------------- |
-| Input | 24,576 dimensions (128 x 96 x 2) |
-| Hidden Layer | 107 LIF neurons, heterogeneous (gains/biases ~ Uniform) |
-| Weight Init | Glorot initialization |
-| Output | 5 classes, linear readout |
+| Component | Configuration | Description |
+| --------- | ------------- | ----------- |
+| Input | 24,576 dimensions | Downsampled time surface (128 × 96 × 2) |
+| Hidden Layer | 107 LIF neurons | Spiking neurons with heterogeneous parameters |
+| Neuron Params | Heterogeneous | Gains ~ U(0.5, 1.5), Biases ~ U(-0.5, 0.5) |
+| Weight Init | Glorot | Xavier/Glorot initialization |
+| Synaptic Filter | None | Single timestep inference |
+| Output | 5 classes | Linear readout (logits) |
 
-#### Hyperparameter
+**Hyperparameters:**
 
-| Parameter | Value |
-| --------- | ----- |
-| Learning Rate | 6.50e-03 |
-| Batch Size | 128 |
-| Weight Decay | 1.00e-04 |
-| Epochs | 300 |
+| Parameter | Value | Description |
+| --------- | ----- | ----------- |
+| Hidden Neurons | 107 | LIF spiking neurons |
+| Initial Learning Rate | 6.50e-03 | Starting learning rate |
+| Batch Size | 128 | Samples per gradient update |
+| Weight Decay | 1.00e-04 | L2 regularization (AdamW) |
+| Label Smoothing | 0.15 | Prevents overconfident predictions |
+| Gradient Clipping | 1.0 | Max gradient norm |
+
+### Training Strategy
+
+To combat overfitting, the training uses several regularization techniques:
+
+- **Dynamic Learning Rate**: ReduceLROnPlateau callback monitors validation loss and reduces LR by 50% after 10 epochs without improvement (minimum LR: 1e-6)
+- **Early Stopping**: Training stops if validation loss doesn't improve for 20 epochs, restoring the best weights
+- **Label Smoothing**: Softens one-hot labels to prevent the model from becoming overconfident
+- **Gradient Clipping**: Stabilizes training by limiting gradient magnitudes, especially important for spiking networks with noisy surrogate gradients
 
 Training uses NengoDL's TensorFlow backend with surrogate gradients for backpropagation through the non-differentiable spike function.
 
