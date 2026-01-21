@@ -4,7 +4,4 @@ __pycache__/
 .ipynb_checkpoints
 *.npz
 *mmap
-*.keras
 logs/*.log
-notebooks/traditionalNN/runs
-tuner_runs/

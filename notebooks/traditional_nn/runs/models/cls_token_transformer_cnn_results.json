@@ -1,0 +1,7 @@
+{
+  "test_acc": 0.8947368264198303,
+  "test_loss": 0.6472324132919312,
+  "best_val_acc": 0.9028006792068481,
+  "epochs": 131,
+  "classification_report": "              precision    recall  f1-score   support\n\n      yannes     0.8730    0.9167    0.8943        60\n      marvin     0.9041    0.9296    0.9167        71\n        mark     0.9074    0.8750    0.8909        56\n     unknown     0.8727    0.8571    0.8649        56\n       stale     0.9153    0.8852    0.9000        61\n\n    accuracy                         0.8947       304\n   macro avg     0.8945    0.8927    0.8933       304\nweighted avg     0.8950    0.8947    0.8946       304\n"
+}
