@@ -232,3 +232,5 @@ Whats missing the the certainty threshold
 ## Live Prediction
 
 tbd;
+
+![Live Prediction](assets/live.gif "Live Prediction")
