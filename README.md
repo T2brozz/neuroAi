@@ -186,7 +186,7 @@ The SNN approach uses biologically-inspired Leaky Integrate-and-Fire (LIF) neuro
 
 ### Feature Preprocessing for SNN
 
-The SNN uses spatially downsampled features (128 x 96 x 2 = 24,576) via 5x5 area averaging, providing a 25x reduction in dimensionality while preserving spatial structure.
+The SNN uses spatially downsampled features (128 x 96 x 2 = 24,576) via 5 x 5 area averaging, providing a 25x reduction in dimensionality while preserving spatial structure.
 
 ### Model Architecture
 
