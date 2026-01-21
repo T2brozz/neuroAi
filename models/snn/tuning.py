@@ -29,7 +29,6 @@ def _ray_trainable(config: Dict[str, Any], X_train: np.ndarray, y_train: np.ndar
     batch_size = int(config["batch_size"])
     weight_decay = float(config.get("weight_decay", 0.0))
     homogeneous = bool(config.get("homogeneous", True))
-    spiking = bool(config.get("spiking", False))
     epochs = int(config.get("epochs", 5))
 
     print("\n" + "=" * 80)
@@ -38,7 +37,6 @@ def _ray_trainable(config: Dict[str, Any], X_train: np.ndarray, y_train: np.ndar
     print(f"  learning_rate={learning_rate:.2e}")
     print(f"  batch_size={batch_size}")
     print(f"  homogeneous={homogeneous}")
-    print(f"  spiking={spiking}")
     print(f"  epochs={epochs}")
 
     # Build network with current hyperparameters
@@ -47,7 +45,7 @@ def _ray_trainable(config: Dict[str, Any], X_train: np.ndarray, y_train: np.ndar
         n_classes=n_classes,
         n_neurons_hidden=n_hidden,
         synapse=None,  # No synaptic filtering for single timestep training
-        spiking=spiking,  # Use RectifiedLinear for gradient-based training
+        spiking=True,  # Use RectifiedLinear for gradient-based training
         homogeneous=homogeneous,  # Test both uniform and diverse neuron parameters
     )
 
@@ -145,7 +143,6 @@ def tune_hyperparameters(
         "batch_size": tune.choice([16, 32, 64, 128]),
         "weight_decay": tune.loguniform(1e-5, 1e-3),
         "homogeneous": tune.choice([True, False]),  # Test homogeneous vs heterogeneous
-        "spiking": tune.choice([True, False]),
     }
 
     print("[Ray Tune] Starting tuning run...")

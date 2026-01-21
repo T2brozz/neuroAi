@@ -35,13 +35,12 @@ def load_snn_model(params_path: Path, hparams_path: Path) -> SNNModel:
     n_features = int(hparams.get('N_FEATURES'))
     n_classes = int(hparams.get('N_CLASSES'))
     best_homogeneous = bool(int(hparams.get('HOMOGENEOUS')))
-    best_spiking = bool(int(hparams.get('SPIKING', 0)))
 
     net, inp, p_out = build_simple_snn(
         n_features=n_features,
         n_classes=n_classes,
         n_neurons_hidden=best_hidden,
-        spiking=best_spiking,
+        spiking=True,
         homogeneous=best_homogeneous   
     )
     

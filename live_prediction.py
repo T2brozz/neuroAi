@@ -148,11 +148,11 @@ def preprocess_events_for_snn(events, camera):
     """Convert events to format suitable for SNN inference.
     
     Uses the same preprocessing as training:
-    - Spatial downsampling: 640x480 -> 64x48
-    - Feature method: histogram with 10 time bins
-    - Output shape: (30720,) = 64 * 48 * 10
+    - Extract features at full resolution (640x480) using time_surface method
+    - Downsample features to 64x48 using area averaging
+    - Output shape: (6144,) = 64 * 48 * 2 channels
     """
-    from models.preprocessing import subsample_spatial
+    from models.preprocessing import downsample_features
     
     # Handle empty / None input
     if events is None or len(events) == 0:
@@ -170,31 +170,34 @@ def preprocess_events_for_snn(events, camera):
     # Match training preprocessing parameters
     TARGET_WIDTH = 64
     TARGET_HEIGHT = 48
-    N_BINS = 10
-    FEATURE_METHOD = "histogram"
+    FEATURE_METHOD = "time_surface"
     
-    # Spatial downsampling (same as training)
-    downsampled = subsample_spatial(
+    # Extract features at full resolution (same as training)
+    features_full = events_to_features(
         structured,
-        target_width=TARGET_WIDTH,
-        target_height=TARGET_HEIGHT,
+        method=FEATURE_METHOD,
+        width=orig_width,
+        height=orig_height,
+    )
+    
+    features_full = features_full.astype(np.float32, copy=False)
+    
+    # Downsample features using area averaging (same as training)
+    # downsample_features expects (n_samples, features), so add batch dim
+    features_batch = features_full.reshape(1, -1)
+    features_downsampled = downsample_features(
+        features_batch,
         orig_width=orig_width,
         orig_height=orig_height,
+        target_width=TARGET_WIDTH,
+        target_height=TARGET_HEIGHT,
+        n_channels=2,  # time_surface has 2 channels (pos/neg)
     )
     
-    # Extract features using histogram method (same as training)
-    features = events_to_features(
-        downsampled,
-        method=FEATURE_METHOD,
-        width=TARGET_WIDTH,
-        height=TARGET_HEIGHT,
-        n_bins=N_BINS,
-    )
-    
-    features = features.astype(np.float32, copy=False)
+    # Remove batch dimension
+    features = features_downsampled.squeeze(0)
     
     # Normalize features (z-score normalization as in training)
-    # For live inference, we use a simple normalization
     mean = features.mean()
     std = features.std()
     if std > 0:

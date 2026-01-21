@@ -182,7 +182,39 @@ The architecture progressively increases filter depth (32 → 64 → 128 → 256
 
 ## Spiking Neural Network (SNN)
 
-tbd;
+The SNN approach uses biologically-inspired Leaky Integrate-and-Fire (LIF) neurons implemented with Nengo and NengoDL. Unlike traditional neural networks, spiking neurons communicate through discrete spike events, making them well-suited for event-based camera data.
+
+### Feature Preprocessing for SNN
+
+The SNN uses spatially downsampled features (128 x 96 x 2 = 24,576) via 5x5 area averaging, providing a 25x reduction in dimensionality while preserving spatial structure.
+
+### Model Architecture
+
+```mermaid
+flowchart LR
+    A[Input<br/>24,576] --> B[LIF Hidden<br/>107 neurons]
+    B --> C[Linear Output<br/>5 classes]
+```
+
+#### Architecture Details
+
+| Component | Configuration |
+| --------- | ------------- |
+| Input | 24,576 dimensions (128 x 96 x 2) |
+| Hidden Layer | 107 LIF neurons, heterogeneous (gains/biases ~ Uniform) |
+| Weight Init | Glorot initialization |
+| Output | 5 classes, linear readout |
+
+#### Hyperparameter
+
+| Parameter | Value |
+| --------- | ----- |
+| Learning Rate | 6.50e-03 |
+| Batch Size | 128 |
+| Weight Decay | 1.00e-04 |
+| Epochs | 300 |
+
+Training uses NengoDL's TensorFlow backend with surrogate gradients for backpropagation through the non-differentiable spike function.
 
 ## Result Comparison and Live Prediction
 
